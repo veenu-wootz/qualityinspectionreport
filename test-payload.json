@@ -1,0 +1,71 @@
+{
+  "report_no": "QIR-2025-0001",
+  "submission_date": "2025-01-15",
+  "your_email": "submitter@example.com",
+  "part_name": "Flange Shaft",
+  "rm_grade": "EN8",
+  "customer": "ACME Corp",
+  "item_code": "FS-2024-001",
+  "heat_no": "HT-98765",
+  "order_qty": "500 Nos",
+  "remarks": "First article inspection",
+  "conclusion": "All dimensions are within specified tolerances. Part approved for production.",
+  "part_drawing": null,
+  "insp_image": null,
+  "sampleCount": 3,
+  "dimRows": [
+    {
+      "index": 1,
+      "parameter": "Outer Diameter",
+      "specificat": "50 ±0.1",
+      "instrument": "Vernier",
+      "samples": ["50.05", "49.98", "50.02"],
+      "status_1": "OK",
+      "qc_photo": null
+    },
+    {
+      "index": 2,
+      "parameter": "Inner Diameter",
+      "specificat": "30 ±0.05",
+      "instrument": "Bore Gauge",
+      "samples": ["30.02", "29.99", "30.01"],
+      "status_1": "OK",
+      "qc_photo": null
+    },
+    {
+      "index": 3,
+      "parameter": "Length",
+      "specificat": "120 ±0.2",
+      "instrument": "Vernier",
+      "samples": ["120.1", "119.95", "120.05"],
+      "status_1": "OK",
+      "qc_photo": null
+    }
+  ],
+  "visRows": [
+    {
+      "index": 1,
+      "parameter": "Surface Finish",
+      "status": "OK",
+      "comments": "Ra 1.6 achieved",
+      "photo": null
+    },
+    {
+      "index": 2,
+      "parameter": "Burr / Sharp Edges",
+      "status": "OK",
+      "comments": "Deburred and chamfered",
+      "photo": null
+    }
+  ],
+  "certificates": [
+    {
+      "label": "Mill Test Certificate",
+      "url": "https://www.w3.org/WAI/WCAG21/Techniques/pdf/sample.pdf"
+    },
+    {
+      "label": "",
+      "url": ""
+    }
+  ]
+}

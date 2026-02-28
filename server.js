@@ -24,6 +24,15 @@ const { sendQIREmail }    = require('./sendEmail');
 const app  = express();
 const PORT = process.env.PORT || 3000;
 
+// Allow requests from any origin (needed for local HTML file testing + Clappia)
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+});
+
 // Parse JSON bodies up to 50MB (base64 images can be large)
 app.use(express.json({ limit: '50mb' }));
 

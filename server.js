@@ -105,6 +105,8 @@ app.post('/generate', async (req, res) => {
   const startTime = Date.now();
   const data = req.body;
 
+  console.log('FULL PAYLOAD:', JSON.stringify(data, null, 2));
+
   // Basic validation
   if (!data || !data.part_name) {
     return res.status(400).json({

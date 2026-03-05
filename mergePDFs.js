@@ -135,7 +135,7 @@ async function stampPageNumbers(pdfBytes, startPageNum) {
     const { width, height } = page.getSize();
     // Use shorter dimension so portrait/landscape both feel the same
     const shortSide = Math.min(width, height);
-    const fontSize  = Math.round(shortSide * 0.028 * 10) / 10;  // ~2.8% of short side
+    const fontSize  = Math.round(shortSide * 0.018 * 10) / 10;  // ~2.8% of short side
     const barH      = fontSize * 2.8;
 
     page.drawRectangle({ x:0, y:0, width, height:barH, color:rgb(0.96,0.96,0.96), opacity:0.9 });
@@ -158,7 +158,7 @@ async function stampHeading(pdfBytes, label) {
     const { width, height } = page.getSize();
 
     const shortSide = Math.min(width, height);
-    const fontSize  = Math.round(shortSide * 0.038 * 10) / 10;  // slightly larger than page num
+    const fontSize  = Math.round(shortSide * 0.025 * 10) / 10;  // slightly larger than page num
     const barH      = fontSize * 3.0;
 
     // White strip — no red line
@@ -232,7 +232,7 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
     const finalNum  = i === 0 ? 1 : i + 2;
     const { width, height } = page.getSize();
     const shortSide = Math.min(width, height);
-    const fontSize  = Math.round(shortSide * 0.028 * 10) / 10;
+    const fontSize  = Math.round(shortSide * 0.018 * 10) / 10;
     const barH      = fontSize * 2.8;
     page.drawRectangle({ x:0, y:0, width, height:barH, color:rgb(0.96,0.96,0.96), opacity:0.9 });
     const pgStr = String(finalNum);

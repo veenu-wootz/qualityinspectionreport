@@ -100,9 +100,20 @@ async function generateQIR(data) {
   doc.line(ML + CW * 0.28, y, ML + CW * 0.28, y + 16);
   doc.line(ML + CW * 0.73, y, ML + CW * 0.73, y + 16);
 
-  doc.setFontSize(7);
-  doc.setTextColor(150, 150, 150);
-  doc.text('[LOGO]', ML + CW * 0.14, y + 9, { align: 'center' });
+  try {
+    const logoRes  = await fetch('https://res.cloudinary.com/dbwg6zz3l/image/upload/v1753101276/Black_Blue_ctiycp.png', { timeout: 10000 });
+    const logoArr  = await logoRes.arrayBuffer();
+    const logoB64  = `data:image/png;base64,${Buffer.from(logoArr).toString('base64')}`;
+    const logoProp = doc.getImageProperties(logoB64);
+    const maxW = CW * 0.22, maxH = 14;
+    const scale = Math.min(maxW / logoProp.width, maxH / logoProp.height);
+    const lw = logoProp.width * scale, lh = logoProp.height * scale;
+    doc.addImage(logoB64, 'PNG', ML + (CW * 0.28 - lw) / 2, y + (16 - lh) / 2, lw, lh);
+  } catch(e) {
+    doc.setFontSize(7);
+    doc.setTextColor(150, 150, 150);
+    doc.text('[LOGO]', ML + CW * 0.14, y + 9, { align: 'center' });
+  }
 
   doc.setFontSize(16);
   doc.setFont('helvetica', 'bold');

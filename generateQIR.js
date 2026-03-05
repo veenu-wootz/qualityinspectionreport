@@ -63,9 +63,10 @@ function drawImgInCell(doc, src, cx, cy, cw, ch, pad = 1.5) {
 async function generateQIR(data) {
   // Pre-fetch all images in parallel before drawing
   console.log('  Pre-fetching images...');
-  const [partDrawingImg, inspImage] = await Promise.all([
+  const [partDrawingImg, inspImage, logoImg] = await Promise.all([
     fetchImageAsDataUrl(data.part_drawing),
     fetchImageAsDataUrl(data.insp_image),
+    fetchImageAsDataUrl('https://res.cloudinary.com/dbwg6zz3l/image/upload/w_400,f_jpg,q_80/v1753101276/Black_Blue_ctiycp.png'),
   ]);
 
   // Fetch dim row QC photos
@@ -100,18 +101,19 @@ async function generateQIR(data) {
   doc.line(ML + CW * 0.28, y, ML + CW * 0.28, y + 16);
   doc.line(ML + CW * 0.73, y, ML + CW * 0.73, y + 16);
 
-  try {
-    const logoRes  = await fetch('https://res.cloudinary.com/dbwg6zz3l/image/upload/v1753101276/Black_Blue_ctiycp.png', { timeout: 10000 });
-    const logoArr  = await logoRes.arrayBuffer();
-    const logoB64  = `data:image/png;base64,${Buffer.from(logoArr).toString('base64')}`;
-    const logoProp = doc.getImageProperties(logoB64);
-    const maxW = CW * 0.22, maxH = 14;
-    const scale = Math.min(maxW / logoProp.width, maxH / logoProp.height);
-    const lw = logoProp.width * scale, lh = logoProp.height * scale;
-    doc.addImage(logoB64, 'PNG', ML + (CW * 0.28 - lw) / 2, y + (16 - lh) / 2, lw, lh);
-  } catch(e) {
-    doc.setFontSize(7);
-    doc.setTextColor(150, 150, 150);
+  if (logoImg) {
+    try {
+      const logoProp = doc.getImageProperties(logoImg);
+      const maxW = CW * 0.22, maxH = 14;
+      const scale = Math.min(maxW / logoProp.width, maxH / logoProp.height);
+      const lw = logoProp.width * scale, lh = logoProp.height * scale;
+      doc.addImage(logoImg, 'JPEG', ML + (CW * 0.28 - lw) / 2, y + (16 - lh) / 2, lw, lh);
+    } catch(e) {
+      doc.setFontSize(7); doc.setTextColor(150, 150, 150);
+      doc.text('[LOGO]', ML + CW * 0.14, y + 9, { align: 'center' });
+    }
+  } else {
+    doc.setFontSize(7); doc.setTextColor(150, 150, 150);
     doc.text('[LOGO]', ML + CW * 0.14, y + 9, { align: 'center' });
   }
 

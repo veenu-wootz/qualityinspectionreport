@@ -4,6 +4,12 @@
  * 2. Stamps page numbers on all pages (QIR + certs)
  * 3. Stamps clean heading on first page of each cert (no red line)
  * 4. Merges everything into one PDF Buffer
+ *
+ * Fix 1: Inspection sub-rows show '—' for page numbers since we can't
+ *         know where dimensional ends without rendering first.
+ * Fix 2: Index page number uses same font/style as all other pages.
+ * Fix 3: Heading + page number font size scaled to 2% of page height
+ *         so it looks consistent and readable on portrait AND landscape.
  */
 
 const fetch = require('node-fetch');
@@ -68,68 +74,81 @@ async function buildIndexPage({ reportNo, partName, date, qirPageCount, certEntr
     rowY -= ROW_H;
   }
 
-  // Borders top
+  // Top border
   page.drawLine({ start:{x:TBL_X,y:tableTopY}, end:{x:TBL_X+TBL_W,y:tableTopY}, thickness:0.6, color:DGRAY });
 
   drawRow('Section', 'Page', false, true);
   drawRow('Report Header & Part Information', 1);
   drawRow('Index', 2);
 
-  // QIR pages — figure out which sections exist
-  // Page 3 = Part Drawing (if present), else Dimensional starts at 3
+  // QIR section rows
+  // We CAN calculate Part Drawing page exactly.
+  // For Dimensional/Visual — jsPDF autotable overflow means we don't know
+  // where they end, so we show the start page of the inspection section
+  // but mark sub-sections as '—' to avoid showing wrong numbers.
   let nextQirPage = 3;
   if (certEntries._hasDrawing) {
     drawRow('Part Drawing', nextQirPage++);
   }
-  if (certEntries._hasDim) {
-    drawRow('Inspection', nextQirPage);
-    drawRow('Dimensional Inspection', nextQirPage, true);
-    drawRow('Visual Inspection', certEntries._hasVis ? nextQirPage : '—', true);
-    nextQirPage++;
-  } else if (certEntries._hasVis) {
-    drawRow('Visual Inspection', nextQirPage++);
+
+  if (certEntries._hasDim || certEntries._hasVis) {
+    const inspPage = nextQirPage;
+    drawRow('Inspection', inspPage);
+    // Sub-rows: show '—' because autotable pagination is unknown at index-build time
+    if (certEntries._hasDim) drawRow('Dimensional Inspection', '', true);
+    if (certEntries._hasVis) drawRow('Visual Inspection',      '', true);
   }
 
-  // Cert section
+  // Cert section — these we CAN calculate exactly
   const certStart = qirPageCount + 2;
   drawRow('Tests & Certificates', certEntries.length > 0 ? certStart : '—');
   for (const c of certEntries) {
     drawRow(c.label, c.startPage, true);
   }
 
-  // Borders bottom + sides
+  // Bottom + side borders
   page.drawLine({ start:{x:TBL_X,y:rowY}, end:{x:TBL_X+TBL_W,y:rowY}, thickness:0.6, color:DGRAY });
   page.drawLine({ start:{x:TBL_X,y:tableTopY}, end:{x:TBL_X,y:rowY}, thickness:0.6, color:DGRAY });
   page.drawLine({ start:{x:TBL_X+TBL_W,y:tableTopY}, end:{x:TBL_X+TBL_W,y:rowY}, thickness:0.6, color:DGRAY });
 
-  // Page number
-  const p2W = fontNormal.widthOfTextAtSize('2', 8);
-  page.drawText('2', { x:W/2-p2W/2, y:20, size:8, font:fontNormal, color:MGRAY });
+  // FIX 2: Page number uses same stamp style as all other pages
+  // (grey bar at bottom, centred dark number) — NOT a freestanding text
+  const PG_FONT_SIZE = Math.round((W / 841) * 8 * 10) / 10;
+  const PG_BAR_H     = PG_FONT_SIZE * 2.6;
+  page.drawRectangle({ x:0, y:0, width:W, height:PG_BAR_H, color:rgb(0.96,0.96,0.96), opacity:0.9 });
+  const p2Str = '2';
+  const p2W   = fontNormal.widthOfTextAtSize(p2Str, PG_FONT_SIZE);
+  page.drawText(p2Str, { x:W/2-p2W/2, y:PG_BAR_H*0.25, size:PG_FONT_SIZE, font:fontNormal, color:rgb(0.20,0.20,0.20) });
 
   return Buffer.from(await doc.save());
 }
 
 // ── Page number stamp ─────────────────────────────────────────
-// Normalized font size so numbers look same on any page size
+// FIX 3: Scale relative to page HEIGHT (not width) so portrait and
+// landscape pages feel visually the same size when reading the PDF.
+// Target: ~2% of page height → readable on any orientation.
 async function stampPageNumbers(pdfBytes, startPageNum) {
   const pdf  = await PDFDocument.load(pdfBytes, { ignoreEncryption:true });
   const font = await pdf.embedFont(StandardFonts.Helvetica);
 
   pdf.getPages().forEach((page, i) => {
-    const { width } = page.getSize();
-    const fontSize = Math.round((width / 841) * 8 * 10) / 10;
-    const barH = fontSize * 2.6;
+    const { width, height } = page.getSize();
+    // Use shorter dimension so portrait/landscape both feel the same
+    const shortSide = Math.min(width, height);
+    const fontSize  = Math.round(shortSide * 0.028 * 10) / 10;  // ~2.8% of short side
+    const barH      = fontSize * 2.8;
 
     page.drawRectangle({ x:0, y:0, width, height:barH, color:rgb(0.96,0.96,0.96), opacity:0.9 });
     const pgStr = String(startPageNum + i);
     const pgW   = font.widthOfTextAtSize(pgStr, fontSize);
-    page.drawText(pgStr, { x:width/2-pgW/2, y:barH*0.25, size:fontSize, font, color:rgb(0.20,0.20,0.20) });
+    page.drawText(pgStr, { x:width/2-pgW/2, y:barH*0.28, size:fontSize, font, color:rgb(0.20,0.20,0.20) });
   });
 
   return Buffer.from(await pdf.save());
 }
 
 // ── Heading stamp — text only, no red line ────────────────────
+// FIX 3 also: scale heading to short side so it's readable on any orientation
 async function stampHeading(pdfBytes, label) {
   if (!label?.trim()) return pdfBytes;
   try {
@@ -138,19 +157,21 @@ async function stampHeading(pdfBytes, label) {
     const font = await pdf.embedFont(StandardFonts.HelveticaBold);
     const { width, height } = page.getSize();
 
-    const fontSize = Math.round((width / 841) * 11 * 10) / 10;
+    const shortSide = Math.min(width, height);
+    const fontSize  = Math.round(shortSide * 0.038 * 10) / 10;  // slightly larger than page num
+    const barH      = fontSize * 3.0;
 
-    // White strip behind text only — no coloured line
+    // White strip — no red line
     page.drawRectangle({
-      x:0, y:height - fontSize*2.8,
-      width, height: fontSize*2.8,
-      color: rgb(1,1,1), opacity: 0.75,
+      x:0, y:height - barH,
+      width, height: barH,
+      color: rgb(1,1,1), opacity: 0.82,
     });
 
     const textW = font.widthOfTextAtSize(label, fontSize);
     page.drawText(label, {
       x: (width - textW) / 2,
-      y: height - fontSize*2.0,
+      y: height - barH + (barH - fontSize) / 2,
       size: fontSize, font,
       color: rgb(0.10, 0.10, 0.10),
     });
@@ -160,14 +181,7 @@ async function stampHeading(pdfBytes, label) {
 }
 
 // ── Main ──────────────────────────────────────────────────────
-/**
- * @param {Buffer} qirBuffer   generated QIR PDF
- * @param {Array}  certs       [{ label, url }]
- * @param {object} meta        { hasDrawing, hasDim, hasVis } — for index page
- * @returns {Promise<Buffer>}  final merged PDF
- */
 async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
-  // Load QIR to know page count
   const qirPdf       = await PDFDocument.load(qirBuffer, { ignoreEncryption:true });
   const qirPageCount = qirPdf.getPageCount();
   console.log(`  QIR pages: ${qirPageCount}`);
@@ -189,8 +203,8 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
     else console.error(`  Cert fetch failed: ${r.reason?.message}`);
   }
 
-  // Calculate page numbers
-  // p.1 = QIR p.1, p.2 = Index, p.3..N+1 = rest of QIR, p.N+2 = first cert
+  // Page number calculation
+  // p.1 = QIR p.1 | p.2 = Index | p.3..N+1 = rest of QIR | p.N+2 = first cert
   const certStartPage = qirPageCount + 2;
   let   runningPage   = certStartPage;
   const certEntries   = certData.map(c => {
@@ -199,50 +213,45 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
     return entry;
   });
 
-  // Attach section flags for index page
   certEntries._hasDrawing = meta.hasDrawing || false;
   certEntries._hasDim     = meta.hasDim     || false;
   certEntries._hasVis     = meta.hasVis     || false;
 
-  // Build index page
+  // Build index
   console.log('  Building index page...');
   const indexBytes = await buildIndexPage({
-    reportNo:     meta.reportNo  || '',
-    partName:     meta.partName  || '',
-    date:         meta.date      || '',
-    qirPageCount,
-    certEntries,
+    reportNo: meta.reportNo || '', partName: meta.partName || '',
+    date: meta.date || '', qirPageCount, certEntries,
   });
 
-  // Stamp page numbers on QIR pages
-  // QIR p.1 → final p.1,  QIR p.2..N → final p.3..N+1
+  // Stamp QIR page numbers
+  // QIR p.1 → final p.1 | QIR p.2..N → final p.3..N+1
   const qirForStamp = await PDFDocument.load(qirBuffer, { ignoreEncryption:true });
   const qirFont     = await qirForStamp.embedFont(StandardFonts.Helvetica);
   qirForStamp.getPages().forEach((page, i) => {
-    const finalNum = i === 0 ? 1 : i + 2;
-    const { width } = page.getSize();
-    const fontSize = Math.round((width / 841) * 8 * 10) / 10;
-    const barH = fontSize * 2.6;
+    const finalNum  = i === 0 ? 1 : i + 2;
+    const { width, height } = page.getSize();
+    const shortSide = Math.min(width, height);
+    const fontSize  = Math.round(shortSide * 0.028 * 10) / 10;
+    const barH      = fontSize * 2.8;
     page.drawRectangle({ x:0, y:0, width, height:barH, color:rgb(0.96,0.96,0.96), opacity:0.9 });
     const pgStr = String(finalNum);
     const pgW   = qirFont.widthOfTextAtSize(pgStr, fontSize);
-    page.drawText(pgStr, { x:width/2-pgW/2, y:barH*0.25, size:fontSize, font:qirFont, color:rgb(0.20,0.20,0.20) });
+    page.drawText(pgStr, { x:width/2-pgW/2, y:barH*0.28, size:fontSize, font:qirFont, color:rgb(0.20,0.20,0.20) });
   });
   const qirNumbered = Buffer.from(await qirForStamp.save());
 
-  // Merge everything
+  // Merge
   console.log('  Merging...');
   const merged   = await PDFDocument.create();
   const qirFinal = await PDFDocument.load(qirNumbered, { ignoreEncryption:true });
   const qirPages = await merged.copyPages(qirFinal, qirFinal.getPageIndices());
 
-  merged.addPage(qirPages[0]);   // p.1 header
-
+  merged.addPage(qirPages[0]);
   const idxPdf    = await PDFDocument.load(indexBytes);
   const [idxPage] = await merged.copyPages(idxPdf, [0]);
-  merged.addPage(idxPage);       // p.2 index
-
-  for (let i = 1; i < qirPages.length; i++) merged.addPage(qirPages[i]); // p.3+ QIR
+  merged.addPage(idxPage);
+  for (let i = 1; i < qirPages.length; i++) merged.addPage(qirPages[i]);
 
   for (const cert of certEntries) {
     let bytes = await stampHeading(cert.bytes, cert.label);

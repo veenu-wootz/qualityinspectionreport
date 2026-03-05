@@ -1,71 +1,82 @@
 {
-  "report_no": "QIR-2025-0001",
-  "submission_date": "2025-01-15",
-  "your_email": "submitter@example.com",
-  "part_name": "Flange Shaft",
-  "rm_grade": "EN8",
-  "customer": "ACME Corp",
-  "item_code": "FS-2024-001",
-  "heat_no": "HT-98765",
-  "order_qty": "500 Nos",
-  "remarks": "First article inspection",
-  "conclusion": "All dimensions are within specified tolerances. Part approved for production.",
-  "part_drawing": null,
-  "insp_image": null,
-  "sampleCount": 3,
-  "dimRows": [
+  "Sample": {
+    "sample_id": "QIR-2025-0001",
+    "title": "First Article Inspection",
+    "part_number": "FS-2024-001",
+    "part_name": "Flange Shaft",
+    "created_at": "2025-03-05",
+    "created_by": "Vinay Jadon",
+    "customer_name": "ACME Corp",
+    "inspection_map": ""
+  },
+  "Related_Inspection": [
     {
-      "index": 1,
+      "sample_id": "QIR-2025-0001",
+      "part_number": "FS-2024-001",
+      "inspection_type": "Dimension",
       "parameter": "Outer Diameter",
-      "specificat": "50 ±0.1",
+      "min_req": "49.9",
+      "max_req": "50.1",
       "instrument": "Vernier",
-      "samples": ["50.05", "49.98", "50.02"],
-      "status_1": "OK",
-      "qc_photo": null
+      "sample_1": "50.05",
+      "sample_2": "49.98",
+      "sample_3": "50.02",
+      "sample_4": "",
+      "sample_5": "",
+      "sample_6": "", "sample_7": "", "sample_8": "", "sample_9": "", "sample_10": "",
+      "status": "Pass",
+      "qc_photo": "",
+      "comment": "",
+      "test_doc": ""
     },
     {
-      "index": 2,
-      "parameter": "Inner Diameter",
-      "specificat": "30 ±0.05",
-      "instrument": "Bore Gauge",
-      "samples": ["30.02", "29.99", "30.01"],
-      "status_1": "OK",
-      "qc_photo": null
-    },
-    {
-      "index": 3,
+      "sample_id": "QIR-2025-0001",
+      "part_number": "FS-2024-001",
+      "inspection_type": "Dimension",
       "parameter": "Length",
-      "specificat": "120 ±0.2",
+      "min_req": "119.8",
+      "max_req": "120.2",
       "instrument": "Vernier",
-      "samples": ["120.1", "119.95", "120.05"],
-      "status_1": "OK",
-      "qc_photo": null
-    }
-  ],
-  "visRows": [
+      "sample_1": "120.1",
+      "sample_2": "119.95",
+      "sample_3": "120.05",
+      "sample_4": "",
+      "sample_5": "",
+      "sample_6": "", "sample_7": "", "sample_8": "", "sample_9": "", "sample_10": "",
+      "status": "Pass",
+      "qc_photo": "",
+      "comment": "",
+      "test_doc": ""
+    },
     {
-      "index": 1,
+      "sample_id": "QIR-2025-0001",
+      "part_number": "FS-2024-001",
+      "inspection_type": "Visual",
       "parameter": "Surface Finish",
-      "status": "OK",
-      "comments": "Ra 1.6 achieved",
-      "photo": null
+      "min_req": "", "max_req": "",
+      "instrument": "Visual",
+      "sample_1": "", "sample_2": "", "sample_3": "", "sample_4": "", "sample_5": "",
+      "sample_6": "", "sample_7": "", "sample_8": "", "sample_9": "", "sample_10": "",
+      "status": "Pass",
+      "qc_photo": "",
+      "comment": "Ra 1.6 achieved",
+      "test_doc": ""
     },
     {
-      "index": 2,
-      "parameter": "Burr / Sharp Edges",
-      "status": "OK",
-      "comments": "Deburred and chamfered",
-      "photo": null
+      "sample_id": "QIR-2025-0001",
+      "part_number": "FS-2024-001",
+      "inspection_type": "Test",
+      "parameter": "Mill Test Certificate",
+      "min_req": "", "max_req": "",
+      "instrument": "",
+      "sample_1": "", "sample_2": "", "sample_3": "", "sample_4": "", "sample_5": "",
+      "sample_6": "", "sample_7": "", "sample_8": "", "sample_9": "", "sample_10": "",
+      "status": "",
+      "qc_photo": "",
+      "comment": "",
+      "test_doc": "Inspection/cert_mill_tc.pdf"
     }
   ],
-  "certificates": [
-    {
-      "label": "Mill Test Certificate",
-      "url": "https://www.w3.org/WAI/WCAG21/Techniques/pdf/sample.pdf"
-    },
-    {
-      "label": "",
-      "url": ""
-    }
-  ]
+  "exported_by": "vinay.jadon@wootz.work",
+  "bcc_email": "vinaywootz@gmail.com"
 }

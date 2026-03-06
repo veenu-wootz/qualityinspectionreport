@@ -1,19 +1,48 @@
 /**
  * mergePDFs.js
  * 1. Builds an index page (page 2 of final PDF)
- * 2. Stamps page numbers on all pages (QIR + certs)
- * 3. Stamps clean heading on first page of each cert (no red line)
+ * 2. Stamps page numbers + logo on ALL pages (QIR + certs)
+ * 3. Stamps heading text (no white strip) on first page of each cert
  * 4. Merges everything into one PDF Buffer
  *
- * Fix 1: Inspection sub-rows show '—' for page numbers since we can't
- *         know where dimensional ends without rendering first.
- * Fix 2: Index page number uses same font/style as all other pages.
- * Fix 3: Heading + page number font size scaled to 2% of page height
- *         so it looks consistent and readable on portrait AND landscape.
+ * Bulletproof page positioning:
+ *   - Uses CropBox if present, falls back to MediaBox
+ *   - All coordinates anchored to actual visible area, not assumed (0,0)
+ *   - Works correctly for scanned PDFs, portrait, landscape, any size
  */
 
 const fetch = require('node-fetch');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
+
+// ── Logo — fetched once at module load, reused across requests ──
+// Stored as base64 PNG bytes so pdf-lib can embed it directly.
+const LOGO_URL = 'https://res.cloudinary.com/dbwg6zz3l/image/upload/w_300,f_png,q_90/v1753101276/Black_Blue_ctiycp.png';
+let   logoPngBytes = null;   // Buffer | null
+
+async function ensureLogo() {
+  if (logoPngBytes) return logoPngBytes;
+  try {
+    const res = await fetch(LOGO_URL, { timeout: 10000 });
+    if (res.ok) {
+      logoPngBytes = Buffer.from(await res.arrayBuffer());
+      console.log(`  Logo fetched: ${(logoPngBytes.length / 1024).toFixed(0)} KB`);
+    }
+  } catch(e) {
+    console.warn('  Logo fetch failed — will skip logo on pages:', e.message);
+  }
+  return logoPngBytes;
+}
+
+// ── Bulletproof visible-area helper ──────────────────────────
+// CropBox defines what viewers actually display.
+// If absent, MediaBox is the full page — use that instead.
+function getVisibleBox(page) {
+  try {
+    const crop = page.getCropBox();
+    if (crop && crop.width > 0 && crop.height > 0) return crop;
+  } catch(_) {}
+  return page.getMediaBox();
+}
 
 // ── Fetch PDF from URL ────────────────────────────────────────
 async function fetchPDF(url) {
@@ -26,7 +55,7 @@ async function fetchPDF(url) {
 }
 
 // ── Index page ────────────────────────────────────────────────
-async function buildIndexPage({ reportNo, partName, date, qirPageCount, certEntries }) {
+async function buildIndexPage({ qirPageCount, certEntries }) {
   const doc  = await PDFDocument.create();
   const W = 841.89, H = 595.28;
   const page = doc.addPage([W, H]);
@@ -43,7 +72,40 @@ async function buildIndexPage({ reportNo, partName, date, qirPageCount, certEntr
 
   page.drawRectangle({ x:0, y:0, width:W, height:H, color:rgb(1,1,1) });
 
-  // Centred title
+  // Page number bar at bottom (same style as all other pages)
+  const shortSide    = Math.min(W, H);
+  const PG_FONT_SIZE = Math.round(shortSide * 0.014 * 10) / 10;
+  const PG_BAR_H     = PG_FONT_SIZE * 2.8;
+
+  page.drawRectangle({ x:0, y:0, width:W, height:PG_BAR_H,
+    color:rgb(0.96,0.96,0.96), opacity:1.0 });
+
+  // Logo in page number bar (left side) — same as all other pages
+  const logoBytes = await ensureLogo();
+  const LOGO_H    = PG_BAR_H * 0.72;
+  const LOGO_PAD  = PG_BAR_H * 0.14;
+  if (logoBytes) {
+    try {
+      const logoImg  = await doc.embedPng(logoBytes);
+      const logoDims = logoImg.scale(1);
+      const scale    = LOGO_H / logoDims.height;
+      const lw       = logoDims.width * scale;
+      page.drawImage(logoImg, {
+        x: LOGO_PAD, y: LOGO_PAD,
+        width: lw, height: LOGO_H,
+      });
+    } catch(e) { /* skip logo silently */ }
+  }
+
+  // Page number centred
+  const p2Str = '2';
+  const p2W   = fontNormal.widthOfTextAtSize(p2Str, PG_FONT_SIZE);
+  page.drawText(p2Str, {
+    x: W/2 - p2W/2, y: PG_BAR_H * 0.25,
+    size: PG_FONT_SIZE, font: fontNormal, color: rgb(0.20,0.20,0.20),
+  });
+
+  // TABLE OF CONTENTS title
   const tocLabel = 'TABLE OF CONTENTS';
   const tocW = fontBold.widthOfTextAtSize(tocLabel, 11);
   page.drawText(tocLabel, { x: W/2 - tocW/2, y: H-52, size:11, font:fontBold, color:BLACK });
@@ -56,7 +118,8 @@ async function buildIndexPage({ reportNo, partName, date, qirPageCount, certEntr
   function drawRow(label, pageNum, isSub=false, isHeader=false) {
     const bg = isHeader ? HDRBG : (isSub ? rgb(1,1,1) : OFFWHT);
     page.drawRectangle({ x:TBL_X, y:rowY-ROW_H, width:TBL_W, height:ROW_H, color:bg });
-    page.drawLine({ start:{x:TBL_X,y:rowY-ROW_H}, end:{x:TBL_X+TBL_W,y:rowY-ROW_H}, thickness:0.3, color:LGRAY });
+    page.drawLine({ start:{x:TBL_X,y:rowY-ROW_H}, end:{x:TBL_X+TBL_W,y:rowY-ROW_H},
+      thickness:0.3, color:LGRAY });
 
     const indent   = isSub ? 18 : 0;
     const fontSize = isHeader ? 8.5 : 8;
@@ -74,105 +137,111 @@ async function buildIndexPage({ reportNo, partName, date, qirPageCount, certEntr
     rowY -= ROW_H;
   }
 
-  // Top border
-  page.drawLine({ start:{x:TBL_X,y:tableTopY}, end:{x:TBL_X+TBL_W,y:tableTopY}, thickness:0.6, color:DGRAY });
+  page.drawLine({ start:{x:TBL_X,y:tableTopY}, end:{x:TBL_X+TBL_W,y:tableTopY},
+    thickness:0.6, color:DGRAY });
 
   drawRow('Section', 'Page', false, true);
   drawRow('Report Header & Part Information', 1);
   drawRow('Index', 2);
 
-  // QIR section rows
-  // We CAN calculate Part Drawing page exactly.
-  // For Dimensional/Visual — jsPDF autotable overflow means we don't know
-  // where they end, so we show the start page of the inspection section
-  // but mark sub-sections as '—' to avoid showing wrong numbers.
   let nextQirPage = 3;
-  if (certEntries._hasDrawing) {
-    drawRow('Part Drawing', nextQirPage++);
-  }
+  if (certEntries._hasDrawing) drawRow('Part Drawing', nextQirPage++);
 
   if (certEntries._hasDim || certEntries._hasVis) {
-    const inspPage = nextQirPage;
-    drawRow('Inspection', inspPage);
-    // Sub-rows: show '—' because autotable pagination is unknown at index-build time
+    drawRow('Inspection', nextQirPage);
     if (certEntries._hasDim) drawRow('Dimensional Inspection', '', true);
     if (certEntries._hasVis) drawRow('Visual Inspection',      '', true);
   }
 
-  // Cert section — these we CAN calculate exactly
   const certStart = qirPageCount + 2;
   drawRow('Tests & Certificates', certEntries.length > 0 ? certStart : '—');
-  for (const c of certEntries) {
-    drawRow(c.label, c.startPage, true);
-  }
+  for (const c of certEntries) drawRow(c.label, c.startPage, true);
 
-  // Bottom + side borders
   page.drawLine({ start:{x:TBL_X,y:rowY}, end:{x:TBL_X+TBL_W,y:rowY}, thickness:0.6, color:DGRAY });
   page.drawLine({ start:{x:TBL_X,y:tableTopY}, end:{x:TBL_X,y:rowY}, thickness:0.6, color:DGRAY });
   page.drawLine({ start:{x:TBL_X+TBL_W,y:tableTopY}, end:{x:TBL_X+TBL_W,y:rowY}, thickness:0.6, color:DGRAY });
 
-  // FIX 2: Page number uses same stamp style as all other pages
-  // (grey bar at bottom, centred dark number) — NOT a freestanding text
-  const shortSide    = Math.min(W, H);
-  const PG_FONT_SIZE = Math.round(shortSide * 0.014 * 10) / 10;
-  const PG_BAR_H     = PG_FONT_SIZE * 2.8;
-  page.drawRectangle({ x:0, y:0, width:W, height:PG_BAR_H, color:rgb(0.96,0.96,0.96), opacity:0.9 });
-  const p2Str = '2';
-  const p2W   = fontNormal.widthOfTextAtSize(p2Str, PG_FONT_SIZE);
-  page.drawText(p2Str, { x:W/2-p2W/2, y:PG_BAR_H*0.25, size:PG_FONT_SIZE, font:fontNormal, color:rgb(0.20,0.20,0.20) });
-
   return Buffer.from(await doc.save());
 }
 
-// ── Page number stamp ─────────────────────────────────────────
-// FIX 3: Scale relative to page HEIGHT (not width) so portrait and
-// landscape pages feel visually the same size when reading the PDF.
-// Target: ~2% of page height → readable on any orientation.
+// ── Stamp page number + logo on every page of a PDF ──────────
 async function stampPageNumbers(pdfBytes, startPageNum) {
-  const pdf  = await PDFDocument.load(pdfBytes, { ignoreEncryption:true });
-  const font = await pdf.embedFont(StandardFonts.Helvetica);
+  const pdf      = await PDFDocument.load(pdfBytes, { ignoreEncryption:true });
+  const font     = await pdf.embedFont(StandardFonts.Helvetica);
+  const logoBytes = await ensureLogo();
+
+  // Embed logo once per document
+  let logoImg = null;
+  if (logoBytes) {
+    try { logoImg = await pdf.embedPng(logoBytes); } catch(e) {}
+  }
 
   pdf.getPages().forEach((page, i) => {
-    const { width, height } = page.getSize();
-    // Use shorter dimension so portrait/landscape both feel the same
+    const box    = getVisibleBox(page);
+    const bx     = box.x, by = box.y;
+    const width  = box.width, height = box.height;
+
     const shortSide = Math.min(width, height);
-    const fontSize  = Math.round(shortSide * 0.014 * 10) / 10;  // ~2.8% of short side
+    const fontSize  = Math.round(shortSide * 0.014 * 10) / 10;
     const barH      = fontSize * 2.8;
 
-    page.drawRectangle({ x:0, y:0, width, height:barH, color:rgb(0.96,0.96,0.96), opacity:0.9 });
+    // Grey bar anchored to actual bottom of visible area
+    page.drawRectangle({ x:bx, y:by, width, height:barH,
+      color:rgb(0.96,0.96,0.96), opacity:1.0 });
+
+    // Logo — left side of bar, vertically centred in bar
+    if (logoImg) {
+      try {
+        const LOGO_H   = barH * 0.72;
+        const LOGO_PAD = barH * 0.14;
+        const logoDims = logoImg.scale(1);
+        const scale    = LOGO_H / logoDims.height;
+        const lw       = logoDims.width * scale;
+        page.drawImage(logoImg, {
+          x: bx + LOGO_PAD, y: by + LOGO_PAD,
+          width: lw, height: LOGO_H,
+        });
+      } catch(e) {}
+    }
+
+    // Page number — centred
     const pgStr = String(startPageNum + i);
     const pgW   = font.widthOfTextAtSize(pgStr, fontSize);
-    page.drawText(pgStr, { x:width/2-pgW/2, y:barH*0.28, size:fontSize, font, color:rgb(0.20,0.20,0.20) });
+    page.drawText(pgStr, {
+      x: bx + width/2 - pgW/2,
+      y: by + barH * 0.28,
+      size: fontSize, font, color: rgb(0.20,0.20,0.20),
+    });
   });
 
   return Buffer.from(await pdf.save());
 }
 
-// ── Heading stamp — text only, no red line ────────────────────
-// FIX 3 also: scale heading to short side so it's readable on any orientation
+// ── Heading stamp — bold text only, NO white strip ────────────
+// Drawn directly onto the page content, top-centre.
+// Uses CropBox/MediaBox to find the actual top edge.
 async function stampHeading(pdfBytes, label) {
   if (!label?.trim()) return pdfBytes;
   try {
     const pdf  = await PDFDocument.load(pdfBytes, { ignoreEncryption:true });
     const page = pdf.getPages()[0];
     const font = await pdf.embedFont(StandardFonts.HelveticaBold);
-    const { width, height } = page.getSize();
+
+    const box    = getVisibleBox(page);
+    const bx     = box.x;
+    const by     = box.y;
+    const width  = box.width;
+    const height = box.height;
 
     const shortSide = Math.min(width, height);
-    const fontSize  = Math.round(shortSide * 0.019 * 10) / 10;  // slightly larger than page num
-    const barH      = fontSize * 3.0;
-
-    // White strip — no red line
-    page.drawRectangle({
-      x:0, y:height - barH,
-      width, height: barH,
-      color: rgb(1,1,1), opacity: 0.82,
-    });
+    const fontSize  = Math.round(shortSide * 0.019 * 10) / 10;
+    // Position: just inside the top edge with a small margin
+    const topMargin = fontSize * 1.5;
 
     const textW = font.widthOfTextAtSize(label, fontSize);
     page.drawText(label, {
-      x: (width - textW) / 2,
-      y: height - barH + (barH - fontSize) / 2,
+      x:    bx + (width - textW) / 2,
+      y:    by + height - topMargin - fontSize,
       size: fontSize, font,
       color: rgb(0.10, 0.10, 0.10),
     });
@@ -183,6 +252,9 @@ async function stampHeading(pdfBytes, label) {
 
 // ── Main ──────────────────────────────────────────────────────
 async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
+  // Pre-fetch logo early so it's ready for all stamp operations
+  await ensureLogo();
+
   const qirPdf       = await PDFDocument.load(qirBuffer, { ignoreEncryption:true });
   const qirPageCount = qirPdf.getPageCount();
   console.log(`  QIR pages: ${qirPageCount}`);
@@ -204,7 +276,7 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
     else console.error(`  Cert fetch failed: ${r.reason?.message}`);
   }
 
-  // Page number calculation
+  // Page number layout:
   // p.1 = QIR p.1 | p.2 = Index | p.3..N+1 = rest of QIR | p.N+2 = first cert
   const certStartPage = qirPageCount + 2;
   let   runningPage   = certStartPage;
@@ -220,25 +292,51 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
 
   // Build index
   console.log('  Building index page...');
-  const indexBytes = await buildIndexPage({
-    reportNo: meta.reportNo || '', partName: meta.partName || '',
-    date: meta.date || '', qirPageCount, certEntries,
-  });
+  const indexBytes = await buildIndexPage({ qirPageCount, certEntries });
 
-  // Stamp QIR page numbers
+  // Stamp QIR page numbers + logo
   // QIR p.1 → final p.1 | QIR p.2..N → final p.3..N+1
   const qirForStamp = await PDFDocument.load(qirBuffer, { ignoreEncryption:true });
   const qirFont     = await qirForStamp.embedFont(StandardFonts.Helvetica);
+  const logoBytes   = logoPngBytes;
+  let   qirLogoImg  = null;
+  if (logoBytes) {
+    try { qirLogoImg = await qirForStamp.embedPng(logoBytes); } catch(e) {}
+  }
+
   qirForStamp.getPages().forEach((page, i) => {
-    const finalNum  = i === 0 ? 1 : i + 2;
-    const { width, height } = page.getSize();
+    const finalNum = i === 0 ? 1 : i + 2;
+    const box    = getVisibleBox(page);
+    const bx     = box.x, by = box.y;
+    const width  = box.width, height = box.height;
     const shortSide = Math.min(width, height);
     const fontSize  = Math.round(shortSide * 0.014 * 10) / 10;
     const barH      = fontSize * 2.8;
-    page.drawRectangle({ x:0, y:0, width, height:barH, color:rgb(0.96,0.96,0.96), opacity:0.9 });
+
+    page.drawRectangle({ x:bx, y:by, width, height:barH,
+      color:rgb(0.96,0.96,0.96), opacity:1.0 });
+
+    if (qirLogoImg) {
+      try {
+        const LOGO_H   = barH * 0.72;
+        const LOGO_PAD = barH * 0.14;
+        const logoDims = qirLogoImg.scale(1);
+        const scale    = LOGO_H / logoDims.height;
+        const lw       = logoDims.width * scale;
+        page.drawImage(qirLogoImg, {
+          x: bx + LOGO_PAD, y: by + LOGO_PAD,
+          width: lw, height: LOGO_H,
+        });
+      } catch(e) {}
+    }
+
     const pgStr = String(finalNum);
     const pgW   = qirFont.widthOfTextAtSize(pgStr, fontSize);
-    page.drawText(pgStr, { x:width/2-pgW/2, y:barH*0.28, size:fontSize, font:qirFont, color:rgb(0.20,0.20,0.20) });
+    page.drawText(pgStr, {
+      x: bx + width/2 - pgW/2,
+      y: by + barH * 0.28,
+      size: fontSize, font: qirFont, color: rgb(0.20,0.20,0.20),
+    });
   });
   const qirNumbered = Buffer.from(await qirForStamp.save());
 

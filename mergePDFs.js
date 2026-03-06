@@ -16,7 +16,7 @@ const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 
 // ── Logo — fetched once at module load, reused across requests ──
 // Stored as base64 PNG bytes so pdf-lib can embed it directly.
-const LOGO_URL = 'https://res.cloudinary.com/dbwg6zz3l/image/upload/w_300,f_png,q_90/v1753101276/Black_Blue_ctiycp.png';
+const LOGO_URL = 'https://storage.googleapis.com/glide-prod.appspot.com/uploads-v2/rIdnwOvTnxdsQUtlXKUB/pub/9CXsJXGVWZXAld8aGYXQ.png';
 let   logoPngBytes = null;   // Buffer | null
 
 async function ensureLogo() {

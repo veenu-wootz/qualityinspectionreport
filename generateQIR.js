@@ -4,6 +4,10 @@
  * Updated for AppSheet data structure.
  * Images are fetched from AppSheet URLs before drawing.
  * Returns a Buffer.
+ *
+ * CHANGE: Part Drawing page removed from here.
+ *         mergePDFs.js now fetches the drawing PDF and inserts
+ *         its first page directly as page 3 of the final document.
  */
 
 const { jsPDF }  = require('jspdf');
@@ -62,9 +66,9 @@ function drawImgInCell(doc, src, cx, cy, cw, ch, pad = 1.5) {
 // ── Main export (async — fetches images) ─────────────────────
 async function generateQIR(data) {
   // Pre-fetch all images in parallel before drawing
+  // NOTE: part_drawing intentionally excluded — handled as PDF page in mergePDFs.js
   console.log('  Pre-fetching images...');
-  const [partDrawingImg, inspImage, logoImg] = await Promise.all([
-    fetchImageAsDataUrl(data.part_drawing),
+  const [inspImage, logoImg] = await Promise.all([
     fetchImageAsDataUrl(data.insp_image),
     fetchImageAsDataUrl('https://storage.googleapis.com/glide-prod.appspot.com/uploads-v2/rIdnwOvTnxdsQUtlXKUB/pub/9CXsJXGVWZXAld8aGYXQ.png'),
   ]);
@@ -166,23 +170,9 @@ async function generateQIR(data) {
     doc.text(lines, ML + 26, y);
   }
 
-  // ── PAGE 2: PART DRAWING ─────────────────────────────────────
-  if (partDrawingImg) {
-    doc.addPage('a4', 'landscape');
-    y = MT;
-    y = sectionHeading(doc, 'Part Drawing', y);
-    try {
-      const props = doc.getImageProperties(partDrawingImg);
-      const maxW = CW * 0.92, maxH = PH - y - MB - 4;
-      let iw = props.width, ih = props.height;
-      const s = Math.min(maxW / iw, maxH / ih, 1);
-      iw *= s; ih *= s;
-      const fmt = partDrawingImg.includes('image/png') ? 'PNG' : 'JPEG';
-      doc.addImage(partDrawingImg, fmt, ML + (CW - iw) / 2, y, iw, ih);
-    } catch (e) { console.warn('  Part drawing image failed:', e.message); }
-  }
-
-  // ── PAGE 3: DIMENSIONAL INSPECTION ───────────────────────────
+  // ── PAGE 2: DIMENSIONAL INSPECTION ───────────────────────────
+  // NOTE: Part Drawing (page 3 in final PDF) is inserted by mergePDFs.js
+  //       after the index page, before these QIR pages are added.
   if (data.dimRows && data.dimRows.length > 0) {
     doc.addPage('a4', 'landscape');
     y = MT;
@@ -233,7 +223,7 @@ async function generateQIR(data) {
     });
   }
 
-  // ── PAGE 4: VISUAL INSPECTION ─────────────────────────────────
+  // ── PAGE 3: VISUAL INSPECTION ─────────────────────────────────
   if (data.visRows && data.visRows.length > 0) {
     doc.addPage('a4', 'landscape');
     y = MT;

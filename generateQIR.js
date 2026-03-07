@@ -158,18 +158,13 @@ async function generateQIR(data) {
     ['Qty',         v(data.order_qty)   ],
   ].filter(([, val]) => val !== null);  // drop pairs where value is empty/null
 
-  // Pack into rows of 3 pairs → 6 cells per row: [Label, Value, Label, Value, Label, Value]
-  // Trailing pairs in the last row are left blank if fields.length isn't a multiple of 3
+  // Pack into rows of 3 pairs → 6 cells per row
   const infoRows = [];
   for (let i = 0; i < fields.length; i += 3) {
     const pair0 = fields[i]     || ['', ''];
     const pair1 = fields[i + 1] || ['', ''];
     const pair2 = fields[i + 2] || ['', ''];
     infoRows.push([pair0[0], pair0[1], pair1[0], pair1[1], pair2[0], pair2[1]]);
-  }
-
-  if (data.remarks && data.remarks.trim()) {
-    infoRows.push(['Note', { content: data.remarks, colSpan: 5, styles: { halign: 'left' } }]);
   }
 
   doc.autoTable({
@@ -186,6 +181,20 @@ async function generateQIR(data) {
     },
   });
   y = doc.lastAutoTable.finalY + 4;
+
+  // Note / Remarks — rendered as a single line below the table, not inside it
+  if (data.remarks && data.remarks.trim()) {
+    doc.setFontSize(8);
+    doc.setFont('helvetica', 'bold');
+    doc.setTextColor(...DARK);
+    doc.text('Note: ', ML, y);
+    const noteLabelW = doc.getTextWidth('Note: ');
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(60, 60, 60);
+    const noteLines = doc.splitTextToSize(data.remarks.trim(), CW - noteLabelW);
+    doc.text(noteLines, ML + noteLabelW, y);
+    y += (noteLines.length * 4.5) + 2;
+  }
 
   // Conclusion on page 1 if present
   if (data.conclusion) {

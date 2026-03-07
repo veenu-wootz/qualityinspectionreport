@@ -8,6 +8,10 @@
  * CHANGE: Part Drawing page removed from here.
  *         mergePDFs.js now fetches the drawing PDF and inserts
  *         its first page directly as page 3 of the final document.
+ *
+ * CHANGE: Part info table — empty fields are skipped entirely (no blank rows).
+ * CHANGE: Dim table  — Instrument col hidden if all blank; Photo col hidden if no photos.
+ * CHANGE: Vis table  — Photo col hidden if no photos exist.
  */
 
 const { jsPDF }  = require('jspdf');
@@ -137,19 +141,43 @@ async function generateQIR(data) {
   doc.setDrawColor(...BORDER);
   doc.setLineWidth(0.3);
 
-  // Part info table
+  // ── PART INFO TABLE — skip fields with empty values ──────────
+  // Helper: returns trimmed string or null if empty
+  const v = (val) => (val && String(val).trim()) ? String(val).trim() : null;
+
+  // All possible fields in display order — only non-null ones are shown
+  const fields = [
+    ['Part Name',   v(data.part_name)   ],
+    ['Part No.',    v(data.part_number) ],
+    ['Customer',    v(data.customer)    ],
+    ['Created By',  v(data.created_by)  ],
+    ['Title',       v(data.title)       ],
+    ['Item Code',   v(data.item_code)   ],
+    ['RM Grade',    v(data.rm_grade)    ],
+    ['Heat No.',    v(data.heat_no)     ],
+    ['Qty',         v(data.order_qty)   ],
+  ].filter(([, val]) => val !== null);  // drop pairs where value is empty/null
+
+  // Pack into rows of 3 pairs → 6 cells per row: [Label, Value, Label, Value, Label, Value]
+  // Trailing pairs in the last row are left blank if fields.length isn't a multiple of 3
+  const infoRows = [];
+  for (let i = 0; i < fields.length; i += 3) {
+    const pair0 = fields[i]     || ['', ''];
+    const pair1 = fields[i + 1] || ['', ''];
+    const pair2 = fields[i + 2] || ['', ''];
+    infoRows.push([pair0[0], pair0[1], pair1[0], pair1[1], pair2[0], pair2[1]]);
+  }
+
+  if (data.remarks && data.remarks.trim()) {
+    infoRows.push(['Note', { content: data.remarks, colSpan: 5, styles: { halign: 'left' } }]);
+  }
+
   doc.autoTable({
     startY: y,
     margin: { left: ML, right: MR },
     tableWidth: CW,
     head: [],
-    body: [
-      ['Part Name',   data.part_name    || '—',  'Part No.',  data.part_number  || '—', 'Customer', data.customer || '—'],
-      ['Created By',  data.created_by   || '—',  'Title',     data.title        || '—', '',         ''],
-      ...(data.remarks
-        ? [['Note', { content: data.remarks, colSpan: 5, styles: { halign: 'left' } }]]
-        : []),
-    ],
+    body: infoRows,
     styles: { fontSize: 8, cellPadding: 2.5, lineColor: BORDER, lineWidth: 0.3 },
     columnStyles: {
       0: { fontStyle: 'bold', fillColor: GRAY, cellWidth: CW * 0.09 },
@@ -172,50 +200,83 @@ async function generateQIR(data) {
 
   // ── PAGE 2: DIMENSIONAL INSPECTION ───────────────────────────
   // NOTE: Part Drawing (page 3 in final PDF) is inserted by mergePDFs.js
-  //       after the index page, before these QIR pages are added.
   if (data.dimRows && data.dimRows.length > 0) {
     doc.addPage('a4', 'landscape');
     y = MT;
     y = sectionHeading(doc, 'Dimensional Inspection', y);
 
-    const n            = data.sampleCount || 5;
-    const ROW_H        = 14;
-    const PHOTO_COL_W  = CW * 0.08;
-    const STATUS_COL_W = CW * 0.065;
-    const FIXED_W      = CW * 0.04 + CW * 0.11 + CW * 0.115 + CW * 0.10 + STATUS_COL_W + PHOTO_COL_W;
-    const sColW        = (CW - FIXED_W) / n;
+    const n = data.sampleCount || 5;
+    const ROW_H = 14;
 
-    const head = [['No.', 'Parameter', 'Specification', 'Instrument',
-      ...Array.from({ length: n }, (_, i) => `${i + 1}`),
-      'Status', 'Photo']];
+    // For each optional column: hide it only if ALL rows have a blank value for it.
+    const allBlank = (rows, key) => rows.every(r => !r[key] || !String(r[key]).trim());
 
-    const body = data.dimRows.map(r => [
-      r.index, r.parameter, r.specificat, r.instrument,
-      ...r.samples.slice(0, n).concat(Array(Math.max(0, n - r.samples.length)).fill('')),
-      r.status_1, '',
-    ]);
+    const showSpec       = !allBlank(data.dimRows, 'specificat');
+    const showInstrument = !allBlank(data.dimRows, 'instrument');
+    const showStatus     = !allBlank(data.dimRows, 'status_1');
+    // Photo column: blank means no fetched image for that row
+    const showDimPhoto   = data.dimRows.some((_, i) => !!dimPhotoMap[i]);
+
+    // Fixed column widths — omitted cols contribute 0, freeing space for sample cols
+    const FIXED_NO_W   = CW * 0.04;
+    const FIXED_PAR_W  = CW * 0.11;
+    const SPEC_W       = showSpec       ? CW * 0.115 : 0;
+    const INSTR_W      = showInstrument ? CW * 0.10  : 0;
+    const STATUS_W     = showStatus     ? CW * 0.065 : 0;
+    const PHOTO_W      = showDimPhoto   ? CW * 0.08  : 0;
+    const FIXED_TOTAL  = FIXED_NO_W + FIXED_PAR_W + SPEC_W + INSTR_W + STATUS_W + PHOTO_W;
+    const sColW        = (CW - FIXED_TOTAL) / n;
+
+    // Build header row and body rows with only present columns
+    const dimHead = ['No.', 'Parameter'];
+    if (showSpec)       dimHead.push('Specification');
+    if (showInstrument) dimHead.push('Instrument');
+    dimHead.push(...Array.from({ length: n }, (_, i) => `${i + 1}`));
+    if (showStatus)     dimHead.push('Status');
+    if (showDimPhoto)   dimHead.push('Photo');
+
+    const dimBody = data.dimRows.map(r => {
+      const row = [r.index, r.parameter];
+      if (showSpec)       row.push(r.specificat   || '');
+      if (showInstrument) row.push(r.instrument   || '');
+      row.push(...r.samples.slice(0, n).concat(Array(Math.max(0, n - r.samples.length)).fill('')));
+      if (showStatus)   row.push(r.status_1 || '');
+      if (showDimPhoto) row.push('');
+      return row;
+    });
+
+    // Column index tracking — shifts as optional cols are added
+    let ci = 2;
+    const specIdx   = showSpec       ? ci++ : -1;
+    const instrIdx  = showInstrument ? ci++ : -1;
+    const sampleStart = ci; ci += n;
+    const statusIdx = showStatus   ? ci++ : -1;
+    const photoIdx  = showDimPhoto ? ci   : -1;
+
+    const dimColStyles = {
+      0: { cellWidth: FIXED_NO_W },
+      1: { cellWidth: FIXED_PAR_W, halign: 'left' },
+      ...Object.fromEntries(Array.from({ length: n }, (_, i) => [sampleStart + i, { cellWidth: sColW }])),
+    };
+    if (showSpec)       dimColStyles[specIdx]  = { cellWidth: SPEC_W };
+    if (showInstrument) dimColStyles[instrIdx]  = { cellWidth: INSTR_W };
+    if (showStatus)     dimColStyles[statusIdx] = { cellWidth: STATUS_W };
+    if (showDimPhoto)   dimColStyles[photoIdx]  = { cellWidth: PHOTO_W };
 
     doc.autoTable({
       startY: y,
       margin: { left: ML, right: MR },
       tableWidth: CW,
-      head, body,
+      head: [dimHead],
+      body: dimBody,
       styles: {
         fontSize: 7.5, cellPadding: 2, lineColor: BORDER, lineWidth: 0.3,
         halign: 'center', valign: 'middle', minCellHeight: ROW_H,
       },
       headStyles: { fillColor: GRAY, textColor: DARK, fontStyle: 'bold', fontSize: 7 },
-      columnStyles: {
-        0: { cellWidth: CW * 0.04 },
-        1: { cellWidth: CW * 0.11, halign: 'left' },
-        2: { cellWidth: CW * 0.115 },
-        3: { cellWidth: CW * 0.10 },
-        [4 + n]: { cellWidth: STATUS_COL_W },
-        [5 + n]: { cellWidth: PHOTO_COL_W },
-        ...Object.fromEntries(Array.from({ length: n }, (_, i) => [4 + i, { cellWidth: sColW }])),
-      },
+      columnStyles: dimColStyles,
       didDrawCell: (d) => {
-        if (d.section === 'body' && d.column.index === 5 + n) {
+        if (showDimPhoto && d.section === 'body' && d.column.index === photoIdx) {
           const img = dimPhotoMap[d.row.index];
           if (img) drawImgInCell(doc, img, d.cell.x, d.cell.y, d.cell.width, d.cell.height);
         }
@@ -229,31 +290,59 @@ async function generateQIR(data) {
     y = MT;
     y = sectionHeading(doc, 'Visual Inspection', y);
 
-    const ROW_H       = 14;
-    const PHOTO_COL_W = CW * 0.09;
+    const ROW_H = 14;
 
-    const head = [['No.', 'Parameter', 'Status', 'Comments', 'Photo']];
-    const body = data.visRows.map(r => [r.index, r.parameter, r.status, r.comments, '']);
+    // Hide each column only if ALL rows are blank for that field
+    const allBlankV = (rows, key) => rows.every(r => !r[key] || !String(r[key]).trim());
+
+    const showVisStatus   = !allBlankV(data.visRows, 'status');
+    const showVisComments = !allBlankV(data.visRows, 'comments');
+    const showVisPhoto    = data.visRows.some((_, i) => !!visPhotoMap[i]);
+
+    const STATUS_W  = showVisStatus   ? CW * 0.10 : 0;
+    const COMMENT_W = showVisComments ? CW - CW * 0.06 - CW * 0.22 - STATUS_W - (showVisPhoto ? CW * 0.09 : 0) : 0;
+    const PHOTO_W   = showVisPhoto    ? CW * 0.09 : 0;
+
+    const visHead = ['No.', 'Parameter'];
+    if (showVisStatus)   visHead.push('Status');
+    if (showVisComments) visHead.push('Comments');
+    if (showVisPhoto)    visHead.push('Photo');
+
+    const visBody = data.visRows.map(r => {
+      const row = [r.index, r.parameter];
+      if (showVisStatus)   row.push(r.status   || '');
+      if (showVisComments) row.push(r.comments || '');
+      if (showVisPhoto)    row.push('');
+      return row;
+    });
+
+    let vi = 2;
+    const visStatusIdx  = showVisStatus   ? vi++ : -1;
+    const visCommentIdx = showVisComments ? vi++ : -1;
+    const visPhotoIdx   = showVisPhoto    ? vi   : -1;
+
+    const visColStyles = {
+      0: { cellWidth: CW * 0.06 },
+      1: { cellWidth: CW * 0.22, halign: 'left' },
+    };
+    if (showVisStatus)   visColStyles[visStatusIdx]  = { cellWidth: STATUS_W };
+    if (showVisComments) visColStyles[visCommentIdx] = { cellWidth: COMMENT_W, halign: 'left' };
+    if (showVisPhoto)    visColStyles[visPhotoIdx]   = { cellWidth: PHOTO_W };
 
     doc.autoTable({
       startY: y,
       margin: { left: ML, right: MR },
       tableWidth: CW,
-      head, body,
+      head: [visHead],
+      body: visBody,
       styles: {
         fontSize: 8, cellPadding: 2.5, lineColor: BORDER, lineWidth: 0.3,
         halign: 'center', valign: 'middle', minCellHeight: ROW_H,
       },
       headStyles: { fillColor: GRAY, textColor: DARK, fontStyle: 'bold' },
-      columnStyles: {
-        0: { cellWidth: CW * 0.06 },
-        1: { cellWidth: CW * 0.22, halign: 'left' },
-        2: { cellWidth: CW * 0.10 },
-        3: { cellWidth: CW - CW * 0.06 - CW * 0.22 - CW * 0.10 - PHOTO_COL_W, halign: 'left' },
-        4: { cellWidth: PHOTO_COL_W },
-      },
+      columnStyles: visColStyles,
       didDrawCell: (d) => {
-        if (d.section === 'body' && d.column.index === 4) {
+        if (showVisPhoto && d.section === 'body' && d.column.index === visPhotoIdx) {
           const img = visPhotoMap[d.row.index];
           if (img) drawImgInCell(doc, img, d.cell.x, d.cell.y, d.cell.width, d.cell.height);
         }

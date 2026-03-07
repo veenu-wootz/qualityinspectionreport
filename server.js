@@ -129,11 +129,11 @@ function parsePayload(body) {
     customer:        sample.customer_name|| '',
     created_by:      sample.created_by   || '',
     title:           sample.title        || '',
-    rm_grade:        '',   // not in AppSheet schema — leave blank
-    item_code:       sample.part_number  || '',
-    heat_no:         '',
-    order_qty:       '',
-    remarks:         '',
+    rm_grade:        sample.rm_grade     || '',
+    item_code:       sample.item_code    || '',
+    heat_no:         sample.heat_no      || '',
+    order_qty:       sample.qty          || '',
+    remarks:         sample.remark       || '',
     conclusion:      '',
 
     // Drawing / images

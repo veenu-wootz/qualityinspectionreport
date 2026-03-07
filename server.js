@@ -159,19 +159,18 @@ app.post('/generate', async (req, res) => {
   const startTime = Date.now();
 
   try {
-    const data = parsePayload(req.body);
-    
-    console.log('\n📥 RAW BODY:', JSON.stringify(req.body, null, 2));
-    
-    console.log(`\n── New QIR ─────────────────────────────────`);
-    console.log(`  Report:   ${data.report_no}`);
-    console.log(`  Part:     ${data.part_name}`);
-    console.log(`  Dim rows: ${data.dimRows.length}`);
-    console.log(`  Vis rows: ${data.visRows.length}`);
-    console.log(`  Certs:    ${data.certificates.length}`);
-    console.log(`  Email to: ${data.your_email}`);
+    // ── RAW payload from AppSheet ──
+    console.log('\n━━━━━━━━━━━━ RAW PAYLOAD ━━━━━━━━━━━━');
+    console.log(JSON.stringify(req.body, null, 2));
+    console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
-    const filename = `${data.report_no}-${data.submission_date}.pdf`
+    const data = parsePayload(req.body);
+
+    // ── Parsed result ──
+    console.log('━━━━━━━━━━━━ PARSED DATA ━━━━━━━━━━━━');
+    console.log(`  report_no:       ${data.report_no}`);
+
+    const filename = `QIR-${data.report_no}-${data.submission_date}.pdf`
       .replace(/[^a-zA-Z0-9\-_.]/g, '_');
 
     // 1. Generate QIR PDF (HTML → jsPDF)
@@ -182,12 +181,13 @@ app.post('/generate', async (req, res) => {
     // 2. Merge certificates
     console.log('\n[2/3] Merging certificates...');
     const mergedBuffer = await buildMergedPDF(qirBuffer, data.certificates, {
-      reportNo:   data.report_no,
-      partName:   data.part_name,
-      date:       data.submission_date,
-      hasDrawing: !!data.part_drawing,
-      hasDim:     data.dimRows.length  > 0,
-      hasVis:     data.visRows.length  > 0,
+      reportNo:       data.report_no,
+      partName:       data.part_name,
+      date:           data.submission_date,
+      partDrawingUrl: data.part_drawing,        // full URL — mergePDFs fetches & inserts p.1
+      hasDrawing:     !!data.part_drawing,
+      hasDim:         data.dimRows.length  > 0,
+      hasVis:         data.visRows.length  > 0,
     });
     console.log(`  Merged: ${(mergedBuffer.length / 1024).toFixed(0)} KB`);
 

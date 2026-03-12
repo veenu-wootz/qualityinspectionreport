@@ -67,6 +67,43 @@ function drawImgInCell(doc, src, cx, cy, cw, ch, pad = 1.5) {
   } catch (e) { /* skip silently */ }
 }
 
+// ── Color helpers ────────────────────────────────────────────
+
+/** Returns [r,g,b] 0-255 from a '#RRGGBB' hex string. */
+function hexToRgb(hex) {
+  const n = parseInt(hex.replace('#',''), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/**
+ * Status cell fill color.
+ * Pass → green, Fail → red, Doubt → orange, else → default (null).
+ */
+function statusColor(status) {
+  const s = String(status || '').trim().toLowerCase();
+  if (s === 'pass')  return hexToRgb('#23C70A');
+  if (s === 'fail')  return hexToRgb('#D94445');
+  if (s === 'doubt') return hexToRgb('#F37D0F');
+  return null;
+}
+
+/**
+ * Out-of-range check for a sample value against min/max strings.
+ * Returns true (highlight red) only when:
+ *   - both min and max are present and numeric
+ *   - the sample value is numeric
+ *   - the value is strictly outside [min, max]
+ * Any text value or missing range → returns false (no highlight).
+ */
+function isOutOfRange(value, min, max) {
+  if (!min && !max) return false;           // no range defined
+  const v   = parseFloat(String(value).trim());
+  const mn  = parseFloat(String(min).trim());
+  const mx  = parseFloat(String(max).trim());
+  if (isNaN(v) || isNaN(mn) || isNaN(mx)) return false;  // text value or range
+  return v < mn || v > mx;
+}
+
 // ── Main export (async — fetches images) ─────────────────────
 async function generateQIR(data) {
   // Pre-fetch all images in parallel before drawing
@@ -115,7 +152,7 @@ async function generateQIR(data) {
       const maxW = CW * 0.22, maxH = 14;
       const scale = Math.min(maxW / logoProp.width, maxH / logoProp.height);
       const lw = logoProp.width * scale, lh = logoProp.height * scale;
-      doc.addImage(logoImg, 'PNG', ML + (CW * 0.28 - lw) / 2, y + (16 - lh) / 2, lw, lh);
+      doc.addImage(logoImg, 'JPEG', ML + (CW * 0.28 - lw) / 2, y + (16 - lh) / 2, lw, lh);
     } catch(e) {
       doc.setFontSize(7); doc.setTextColor(150, 150, 150);
       doc.text('[LOGO]', ML + CW * 0.14, y + 9, { align: 'center' });
@@ -284,6 +321,25 @@ async function generateQIR(data) {
       },
       headStyles: { fillColor: GRAY, textColor: DARK, fontStyle: 'bold', fontSize: 7 },
       columnStyles: dimColStyles,
+      willDrawCell: (d) => {
+        if (d.section !== 'body') return;
+        const rowData = data.dimRows[d.row.index];
+        if (!rowData) return;
+
+        // Status column — colour by Pass/Fail/Doubt
+        if (showStatus && d.column.index === statusIdx) {
+          const col = statusColor(rowData.status_1);
+          if (col) d.cell.styles.fillColor = col;
+        }
+
+        // Sample columns — highlight red if out of range
+        if (d.column.index >= sampleStart && d.column.index < sampleStart + n) {
+          const sampleVal = rowData.samples[d.column.index - sampleStart];
+          if (isOutOfRange(sampleVal, rowData.min, rowData.max)) {
+            d.cell.styles.fillColor = hexToRgb('#D94445');
+          }
+        }
+      },
       didDrawCell: (d) => {
         if (showDimPhoto && d.section === 'body' && d.column.index === photoIdx) {
           const img = dimPhotoMap[d.row.index];
@@ -350,6 +406,17 @@ async function generateQIR(data) {
       },
       headStyles: { fillColor: GRAY, textColor: DARK, fontStyle: 'bold' },
       columnStyles: visColStyles,
+      willDrawCell: (d) => {
+        if (d.section !== 'body') return;
+        // Status column — colour by Pass/Fail/Doubt
+        if (showVisStatus && d.column.index === visStatusIdx) {
+          const rowData = data.visRows[d.row.index];
+          if (rowData) {
+            const col = statusColor(rowData.status);
+            if (col) d.cell.styles.fillColor = col;
+          }
+        }
+      },
       didDrawCell: (d) => {
         if (showVisPhoto && d.section === 'body' && d.column.index === visPhotoIdx) {
           const img = visPhotoMap[d.row.index];

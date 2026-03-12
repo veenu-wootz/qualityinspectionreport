@@ -50,7 +50,7 @@ async function sendQIREmail(data, pdfBuffer, filename) {
     return;
   }
 
-  const subject = `Quality Inspection Report — ${data.report_no} | ${data.part_name}`;
+  const subject = `Inspection Report — ${data.part_number} | ${data.part_name}`;
 
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
@@ -84,19 +84,19 @@ async function sendQIREmail(data, pdfBuffer, filename) {
             <td style="padding:6px 0;color:#888;">Inspections</td>
             <td style="padding:6px 0;">${data.dimRows?.length || 0} dimensional,
               ${data.visRows?.length || 0} visual,
-              ${data.certificates?.length || 0} test certificate(s)</td>
+              ${data.certificates?.length || 0} doc/test report(s)</td>
           </tr>
         </table>
       </div>
       <div style="background:#fff;padding:16px 24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;">
         <p style="margin:0;font-size:13px;color:#555;">
-          The complete Quality Inspection Report with all certificates is attached.
+          Please find the attached Quality Inspection Report with all uploaded documents.
         </p>
       </div>
     </div>`;
 
   const info = await getTransporter().sendMail({
-    from:        `"QIR System" <${process.env.SMTP_USER}>`,
+    from:        `"Wootz.Checkin" <${process.env.SMTP_USER}>`,
     to:          to || undefined,
     bcc:         bcc || undefined,
     subject,

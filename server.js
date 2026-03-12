@@ -91,6 +91,8 @@ function parsePayload(body) {
         parameter:  row.parameter   || '',
         specificat: `${row.min_req || ''}${row.min_req && row.max_req ? ' – ' : ''}${row.max_req || ''}`,
         instrument: row.instrument  || '',
+        min:        row.min_req     || '',
+        max:        row.max_req     || '',        
         samples,
         status_1:   row.status      || '',
         qc_photo:   appsheetFileUrl(row.qc_photo),

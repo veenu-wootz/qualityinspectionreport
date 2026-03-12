@@ -170,7 +170,7 @@ app.post('/generate', async (req, res) => {
     console.log('━━━━━━━━━━━━ PARSED DATA ━━━━━━━━━━━━');
     console.log(`  report_no:       ${data.report_no}`);
 
-    const filename = `QIR-${data.report_no}-${data.submission_date}.pdf`
+    const filename = `Inspection Report-${data.title}-${Date.now()}.pdf`
       .replace(/[^a-zA-Z0-9\-_.]/g, '_');
 
     // 1. Generate QIR PDF (HTML → jsPDF)

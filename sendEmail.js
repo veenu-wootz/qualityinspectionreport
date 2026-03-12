@@ -50,7 +50,7 @@ async function sendQIREmail(data, pdfBuffer, filename) {
     return;
   }
 
-  const subject = `Inspection — ${data.title}-${Date.now()} | ${data.part_number}-${Date.now()}`;
+  const subject = `Inspection — ${data.title} | ${data.part_number} ${new Date().toLocaleString('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })}`;
 
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">

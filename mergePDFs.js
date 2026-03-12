@@ -23,7 +23,7 @@ const fetch = require('node-fetch');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 
 // ── Logo — fetched once, reused across all requests ──────────
-const LOGO_URL = 'https://storage.googleapis.com/glide-prod.appspot.com/uploads-v2/rIdnwOvTnxdsQUtlXKUB/pub/9CXsJXGVWZXAld8aGYXQ.png';
+const LOGO_URL = 'https://storage.googleapis.com/glide-prod.appspot.com/uploads-v2/rIdnwOvTnxdsQUtlXKUB/pub/gfde2QvEVFNokJXJQdEP.png';
 let logoPngBytes = null;
 
 async function ensureLogo() {
@@ -57,7 +57,7 @@ async function fetchPDF(url) {
     headers: { 'User-Agent': 'QIR-Server/2.0' },
     timeout: 30000,
   });
-  if (!res.ok) throw new Error(`HTTP ${res.status} for ${String(url).substring(0, 80)}`);
+  if (!res.ok) throw new Error(` ${res.status} for ${String(url).substring(0, 80)}`);
   return Buffer.from(await res.arrayBuffer());
 }
 

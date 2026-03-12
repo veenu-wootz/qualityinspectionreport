@@ -82,7 +82,7 @@ function hexToRgb(hex) {
 function statusColor(status) {
   const s = String(status || '').trim().toLowerCase();
   if (s === 'pass')  return hexToRgb('#C8F5C8');
-  if (s === 'fail')  return hexToRgb('#F5A8A8');
+  if (s === 'fail')  return hexToRgb('#FADBD8');
   if (s === 'doubt') return hexToRgb('#FDEBD0');
   return null;
 }

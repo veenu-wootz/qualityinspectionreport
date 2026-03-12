@@ -338,7 +338,7 @@ async function generateQIR(data) {
           if (rowData) {
             const sampleVal = rowData.samples[d.column.index - sampleStart];
             if (isOutOfRange(sampleVal, rowData.min, rowData.max)) {
-              d.cell.styles.fillColor = hexToRgb('#D94445');
+              d.cell.styles.fillColor = hexToRgb('#FADBD8');
             }
           }
         }

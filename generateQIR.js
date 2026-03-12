@@ -115,7 +115,7 @@ async function generateQIR(data) {
       const maxW = CW * 0.22, maxH = 14;
       const scale = Math.min(maxW / logoProp.width, maxH / logoProp.height);
       const lw = logoProp.width * scale, lh = logoProp.height * scale;
-      doc.addImage(logoImg, 'JPEG', ML + (CW * 0.28 - lw) / 2, y + (16 - lh) / 2, lw, lh);
+      doc.addImage(logoImg, 'PNG', ML + (CW * 0.28 - lw) / 2, y + (16 - lh) / 2, lw, lh);
     } catch(e) {
       doc.setFontSize(7); doc.setTextColor(150, 150, 150);
       doc.text('[LOGO]', ML + CW * 0.14, y + 9, { align: 'center' });

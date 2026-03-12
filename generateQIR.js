@@ -321,22 +321,25 @@ async function generateQIR(data) {
       },
       headStyles: { fillColor: GRAY, textColor: DARK, fontStyle: 'bold', fontSize: 7 },
       columnStyles: dimColStyles,
-      willDrawCell: (d) => {
+      didParseCell: (d) => {
         if (d.section !== 'body') return;
-        const rowData = data.dimRows[d.row.index];
-        if (!rowData) return;
+        const raw = d.row.raw;
 
         // Status column — colour by Pass/Fail/Doubt
         if (showStatus && d.column.index === statusIdx) {
-          const col = statusColor(rowData.status_1);
+          const col = statusColor(raw[statusIdx]);
           if (col) d.cell.styles.fillColor = col;
         }
 
-        // Sample columns — highlight red if out of range
+        // Sample columns — highlight red if value is out of min/max range
         if (d.column.index >= sampleStart && d.column.index < sampleStart + n) {
-          const sampleVal = rowData.samples[d.column.index - sampleStart];
-          if (isOutOfRange(sampleVal, rowData.min, rowData.max)) {
-            d.cell.styles.fillColor = hexToRgb('#D94445');
+          const rowNo   = raw[0];
+          const rowData = data.dimRows.find(r => r.index === rowNo);
+          if (rowData) {
+            const sampleVal = rowData.samples[d.column.index - sampleStart];
+            if (isOutOfRange(sampleVal, rowData.min, rowData.max)) {
+              d.cell.styles.fillColor = hexToRgb('#D94445');
+            }
           }
         }
       },
@@ -406,15 +409,12 @@ async function generateQIR(data) {
       },
       headStyles: { fillColor: GRAY, textColor: DARK, fontStyle: 'bold' },
       columnStyles: visColStyles,
-      willDrawCell: (d) => {
+      didParseCell: (d) => {
         if (d.section !== 'body') return;
         // Status column — colour by Pass/Fail/Doubt
         if (showVisStatus && d.column.index === visStatusIdx) {
-          const rowData = data.visRows[d.row.index];
-          if (rowData) {
-            const col = statusColor(rowData.status);
-            if (col) d.cell.styles.fillColor = col;
-          }
+          const col = statusColor(d.row.raw[visStatusIdx]);
+          if (col) d.cell.styles.fillColor = col;
         }
       },
       didDrawCell: (d) => {

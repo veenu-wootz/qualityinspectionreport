@@ -74,7 +74,7 @@ async function generateQIR(data) {
   console.log('  Pre-fetching images...');
   const [inspImage, logoImg] = await Promise.all([
     fetchImageAsDataUrl(data.insp_image),
-    fetchImageAsDataUrl('https://storage.googleapis.com/glide-prod.appspot.com/uploads-v2/rIdnwOvTnxdsQUtlXKUB/pub/9CXsJXGVWZXAld8aGYXQ.png'),
+    fetchImageAsDataUrl('https://storage.googleapis.com/glide-prod.appspot.com/uploads-v2/rIdnwOvTnxdsQUtlXKUB/pub/gfde2QvEVFNokJXJQdEP.png'),
   ]);
 
   // Fetch dim row QC photos

@@ -50,7 +50,7 @@ async function sendQIREmail(data, pdfBuffer, filename) {
     return;
   }
 
-  const subject = `Inspection Report — ${data.part_number} | ${data.part_name}`;
+  const subject = `Inspection — ${data.title}-${Date.now() | ${data.part_number}-${Date.now()`;
 
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
@@ -61,8 +61,8 @@ async function sendQIREmail(data, pdfBuffer, filename) {
       <div style="background:#f9f9f9;padding:24px;border:1px solid #e0e0e0;border-top:none;">
         <table style="width:100%;border-collapse:collapse;font-size:13px;">
           <tr>
-            <td style="padding:6px 0;color:#888;width:130px;">Part Name</td>
-            <td style="padding:6px 0;font-weight:600;">${data.part_name || '—'}</td>
+            <td style="padding:6px 0;color:#888;width:130px;">Title</td>
+            <td style="padding:6px 0;font-weight:600;">${data.title || '—'}</td>
           </tr>
           <tr>
             <td style="padding:6px 0;color:#888;">Part Number</td>
@@ -90,7 +90,7 @@ async function sendQIREmail(data, pdfBuffer, filename) {
       </div>
       <div style="background:#fff;padding:16px 24px;border:1px solid #e0e0e0;border-top:none;border-radius:0 0 8px 8px;">
         <p style="margin:0;font-size:13px;color:#555;">
-          Please find the attached Quality Inspection Report with all uploaded documents.
+          Compiled Quality Inspection Report with all the documents is attached.
         </p>
       </div>
     </div>`;

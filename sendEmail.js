@@ -54,7 +54,7 @@ async function sendQIREmail(data, pdfBuffer, filename) {
 
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
-      <div style="background:#1b6698;padding:20px 24px;border-radius:8px 8px 0 0;">
+      <div style="background:#1a1a2e;padding:20px 24px; border:1px solid #e0e0e0;border-bottom:none; border-radius:8px 8px 0 0;">
         <h2 style="color:#fff;margin:0;font-size:18px;">Quality Inspection Report</h2>
         <p style="color:#aaa;margin:4px 0 0;font-size:13px;">${data.report_no}</p>
       </div>

@@ -50,11 +50,11 @@ async function sendQIREmail(data, pdfBuffer, filename) {
     return;
   }
 
-  const subject = `Inspection — ${data.title}-${Date.now() | ${data.part_number}-${Date.now()`;
+  const subject = `Inspection — ${data.title}-${Date.now()} | ${data.part_number}-${Date.now()}`;
 
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
-      <div style="background:#1a1a1a;padding:20px 24px;border-radius:8px 8px 0 0;">
+      <div style="background:#1b6698;padding:20px 24px;border-radius:8px 8px 0 0;">
         <h2 style="color:#fff;margin:0;font-size:18px;">Quality Inspection Report</h2>
         <p style="color:#aaa;margin:4px 0 0;font-size:13px;">${data.report_no}</p>
       </div>

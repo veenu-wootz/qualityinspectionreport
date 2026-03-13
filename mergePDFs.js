@@ -23,7 +23,7 @@ const fetch = require('node-fetch');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 
 // ── Logo — fetched once, reused across all requests ──────────
-const LOGO_URL = 'https://storage.googleapis.com/glide-prod.appspot.com/uploads-v2/rIdnwOvTnxdsQUtlXKUB/pub/gfde2QvEVFNokJXJQdEP.png';
+const LOGO_URL = 'https://storage.googleapis.com/glide-prod.appspot.com/uploads-v2/rIdnwOvTnxdsQUtlXKUB/pub/9CXsJXGVWZXAld8aGYXQ.png';
 let logoPngBytes = null;
 
 async function ensureLogo() {
@@ -57,7 +57,7 @@ async function fetchPDF(url) {
     headers: { 'User-Agent': 'QIR-Server/2.0' },
     timeout: 30000,
   });
-  if (!res.ok) throw new Error(` ${res.status} for ${String(url).substring(0, 80)}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${String(url).substring(0, 80)}`);
   return Buffer.from(await res.arrayBuffer());
 }
 
@@ -162,6 +162,61 @@ async function prepareDrawingPage(drawingUrl, pageNum) {
   return drawingBytes;
 }
 
+// ── Fit external page to A4 landscape ────────────────────────
+// Target: 841.89 × 595.28 pt (A4 landscape)
+// Rules:
+//   - If either dimension exceeds target → scale DOWN uniformly so both fit
+//   - If both dimensions within target   → no scaling, just centre
+//   - In both cases: set page to target size, white background, content centred
+//   - Never scales up (scale capped at 1.0)
+const TARGET_W = 841.89;
+const TARGET_H = 595.28;
+
+async function fitPageToA4Landscape(pdfBytes) {
+  // We rebuild each page into a new PDF, embedding the original as an XObject.
+  // This is the most reliable way to scale+centre PDF page content in pdf-lib
+  // without wrestling with raw content stream transforms.
+  const srcPdf  = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const outPdf  = await PDFDocument.create();
+
+  for (let i = 0; i < srcPdf.getPageCount(); i++) {
+    // Embed the source page as an XObject (form) in the output PDF
+    const [embedded] = await outPdf.embedPdf(srcPdf, [i]);
+
+    const srcPage = srcPdf.getPages()[i];
+    const pageW   = srcPage.getWidth();
+    const pageH   = srcPage.getHeight();
+
+    // Uniform scale — capped at 1.0 (never upscale)
+    const scale   = Math.min(TARGET_W / pageW, TARGET_H / pageH, 1.0);
+    const scaledW = pageW  * scale;
+    const scaledH = pageH  * scale;
+
+    // Offset to centre scaled content on target page
+    const offsetX = (TARGET_W - scaledW) / 2;
+    const offsetY = (TARGET_H - scaledH) / 2;
+
+    // Create a fresh A4 landscape page
+    const newPage = outPdf.addPage([TARGET_W, TARGET_H]);
+
+    // White background
+    newPage.drawRectangle({
+      x: 0, y: 0, width: TARGET_W, height: TARGET_H,
+      color: rgb(1, 1, 1), opacity: 1.0,
+    });
+
+    // Draw the embedded page content, scaled and centred
+    newPage.drawPage(embedded, {
+      x: offsetX, y: offsetY,
+      width:  scaledW,
+      height: scaledH,
+      opacity: 1.0,
+    });
+  }
+
+  return Buffer.from(await outPdf.save());
+}
+
 // ── Index page ────────────────────────────────────────────────
 async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
   const doc = await PDFDocument.create();
@@ -211,7 +266,7 @@ async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
   });
 
   // Title
-  const tocLabel = 'Table of Content';
+  const tocLabel = 'TABLE OF CONTENTS';
   const tocW = fontBold.widthOfTextAtSize(tocLabel, 11);
   page.drawText(tocLabel, { x: W / 2 - tocW / 2, y: H - 52, size: 11, font: fontBold, color: BLACK });
 
@@ -244,8 +299,8 @@ async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
     thickness: 0.6, color: DGRAY });
 
   drawRow('Section', 'Page', false, true);
-  drawRow('Part Information', 1);
-  drawRow('Content Table', 2);
+  drawRow('Report Header & Part Information', 1);
+  drawRow('Index', 2);
 
   // Page 3 is drawing if present, otherwise inspection starts at 3
   // QIR p.2 onwards maps to: final = i === 0 ? 1 : (hasDrawing ? i+3 : i+2)
@@ -392,6 +447,9 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
       singleDoc.addPage(pg1);
       let drawBytes   = Buffer.from(await singleDoc.save());
 
+      // Fit to A4 landscape (scale down if needed, centre, white background)
+      drawBytes = await fitPageToA4Landscape(drawBytes);
+
       // Stamp heading "Part Drawing" at top
       drawBytes = await stampHeading(drawBytes, 'Part Drawing');
 
@@ -431,7 +489,8 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
 
   // Certs
   for (const cert of certEntries) {
-    let bytes = await stampHeading(cert.bytes, cert.label);
+    let bytes = await fitPageToA4Landscape(cert.bytes);
+    bytes     = await stampHeading(bytes, cert.label);
     bytes     = await stampPageNumbers(bytes, cert.startPage);
     const cp  = await PDFDocument.load(bytes, { ignoreEncryption: true });
     const pgs = await merged.copyPages(cp, cp.getPageIndices());

@@ -23,7 +23,7 @@ const fetch = require('node-fetch');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 
 // ── Logo — fetched once, reused across all requests ──────────
-const LOGO_URL = 'https://storage.googleapis.com/glide-prod.appspot.com/uploads-v2/rIdnwOvTnxdsQUtlXKUB/pub/9CXsJXGVWZXAld8aGYXQ.png';
+const LOGO_URL = 'https://storage.googleapis.com/glide-prod.appspot.com/uploads-v2/rIdnwOvTnxdsQUtlXKUB/pub/gfde2QvEVFNokJXJQdEP.png';
 let logoPngBytes = null;
 
 async function ensureLogo() {
@@ -79,7 +79,7 @@ async function stampPageNumbers(pdfBytes, startPageNum) {
 
     const shortSide = Math.min(width, height);
     const fontSize  = Math.round(shortSide * 0.014 * 10) / 10;
-    const barH      = fontSize * 2.8;
+    const barH      = fontSize * 2;
 
     page.drawRectangle({ x: bx, y: by, width, height: barH,
       color: rgb(0.96, 0.96, 0.96), opacity: 1.0 });
@@ -102,7 +102,7 @@ async function stampPageNumbers(pdfBytes, startPageNum) {
     const pgW   = font.widthOfTextAtSize(pgStr, fontSize);
     page.drawText(pgStr, {
       x: bx + width / 2 - pgW / 2,
-      y: by + barH * 0.28,
+      y: by +  * 0.28,
       size: fontSize, font, color: rgb(0.20, 0.20, 0.20),
     });
   });
@@ -410,7 +410,7 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
     const width     = box.width, height = box.height;
     const shortSide = Math.min(width, height);
     const fontSize  = Math.round(shortSide * 0.014 * 10) / 10;
-    const barH      = fontSize * 2.8;
+    const barH      = fontSize * 2;
 
     page.drawRectangle({ x: bx, y: by, width, height: barH,
       color: rgb(0.96, 0.96, 0.96), opacity: 1.0 });

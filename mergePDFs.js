@@ -238,7 +238,7 @@ async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
   // Footer bar (same style as all other pages)
   const shortSide    = Math.min(W, H);
   const PG_FONT_SIZE = Math.round(shortSide * 0.014 * 10) / 10;
-  const PG_BAR_H     = PG_FONT_SIZE * 2.8;
+  const PG_BAR_H     = PG_FONT_SIZE * 2;
 
   page.drawRectangle({ x: 0, y: 0, width: W, height: PG_BAR_H,
     color: rgb(0.96, 0.96, 0.96), opacity: 1.0 });

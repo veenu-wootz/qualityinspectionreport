@@ -102,7 +102,7 @@ async function stampPageNumbers(pdfBytes, startPageNum) {
     const pgW   = font.widthOfTextAtSize(pgStr, fontSize);
     page.drawText(pgStr, {
       x: bx + width / 2 - pgW / 2,
-      y: by +  * 0.28,
+      y: by + barH * 0.28,
       size: fontSize, font, color: rgb(0.20, 0.20, 0.20),
     });
   });

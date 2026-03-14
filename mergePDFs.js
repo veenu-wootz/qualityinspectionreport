@@ -283,7 +283,7 @@ async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
   });
 
   // Title
-  const tocLabel = 'TABLE OF CONTENTS';
+  const tocLabel = 'Table of Content';
   const tocW = fontBold.widthOfTextAtSize(tocLabel, 11);
   page.drawText(tocLabel, { x: W / 2 - tocW / 2, y: H - 52, size: 11, font: fontBold, color: BLACK });
 
@@ -316,8 +316,8 @@ async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
     thickness: 0.6, color: DGRAY });
 
   drawRow('Section', 'Page', false, true);
-  drawRow('Report Header & Part Information', 1);
-  drawRow('Index', 2);
+  drawRow('Part Information', 1);
+  drawRow('Content Table', 2);
 
   // Page 3 is drawing if present, otherwise inspection starts at 3
   // QIR p.2 onwards maps to: final = i === 0 ? 1 : (hasDrawing ? i+3 : i+2)

@@ -137,6 +137,7 @@ function parsePayload(body) {
     order_qty:       sample.qty          || '',
     remarks:         sample.remark       || '',
     conclusion:      '',
+    verified_by: sample.verified_by || '',
 
     // Drawing / images
     part_drawing:    appsheetFileUrl(sample.inspection_map),

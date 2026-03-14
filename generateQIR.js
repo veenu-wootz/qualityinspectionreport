@@ -193,6 +193,7 @@ async function generateQIR(data) {
     ['RM Grade',    v(data.rm_grade)    ],
     ['Heat No.',    v(data.heat_no)     ],
     ['Qty',         v(data.order_qty)   ],
+    ['Verified By', v(data.verified_by)],
   ].filter(([, val]) => val !== null);  // drop pairs where value is empty/null
 
   // Pack into rows of 3 pairs → 6 cells per row

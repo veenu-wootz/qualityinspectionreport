@@ -118,7 +118,7 @@ async function stampPageNumbers(pdfBytes, startPageNum, label = null) {
     } else {
       // Default: page number centred (QIR + drawing pages)
       page.drawText(pgStr, {
-        x: bx + width / 2 - pgW / 2,
+        x: bx + width - PAD_R - pgW,
         y: textY, size: fontSize, font, color: rgb(0.20, 0.20, 0.20),
       });
     }
@@ -278,7 +278,7 @@ async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
   const p2Str = '2';
   const p2W   = fontNormal.widthOfTextAtSize(p2Str, PG_FONT_SIZE);
   page.drawText(p2Str, {
-    x: W / 2 - p2W / 2, y: PG_BAR_H * 0.25,
+    x: W - PG_BAR_H * 0.8 - p2W, y: PG_BAR_H * 0.25,
     size: PG_FONT_SIZE, font: fontNormal, color: rgb(0.20, 0.20, 0.20),
   });
 
@@ -444,9 +444,10 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
     }
 
     const pgStr = String(finalNum);
+    const PAD_R = barH * 0.8;
     const pgW   = qirFont.widthOfTextAtSize(pgStr, fontSize);
     page.drawText(pgStr, {
-      x: bx + width / 2 - pgW / 2,
+      x: bx + width - PAD_R - pgW,
       y: by + barH * 0.28,
       size: fontSize, font: qirFont, color: rgb(0.20, 0.20, 0.20),
     });

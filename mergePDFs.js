@@ -62,9 +62,10 @@ async function fetchPDF(url) {
 }
 
 // ── Stamp page number + logo on every page of a PDF ──────────
-async function stampPageNumbers(pdfBytes, startPageNum) {
+async function stampPageNumbers(pdfBytes, startPageNum, label = null) {
   const pdf       = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
   const font      = await pdf.embedFont(StandardFonts.Helvetica);
+  const fontBold  = await pdf.embedFont(StandardFonts.HelveticaBold);
   const logoBytes = await ensureLogo();
 
   let logoImg = null;
@@ -100,11 +101,27 @@ async function stampPageNumbers(pdfBytes, startPageNum) {
 
     const pgStr = String(startPageNum + i);
     const pgW   = font.widthOfTextAtSize(pgStr, fontSize);
-    page.drawText(pgStr, {
-      x: bx + width / 2 - pgW / 2,
-      y: by + barH * 0.28,
-      size: fontSize, font, color: rgb(0.20, 0.20, 0.20),
-    });
+    const textY = by + barH * 0.28;
+    const PAD_R = barH * 0.8;
+
+    if (label) {
+      // Label centred on every page, page number right-aligned
+      const labelW = fontBold.widthOfTextAtSize(label, fontSize);
+      page.drawText(label, {
+        x: bx + width / 2 - labelW / 2,
+        y: textY, size: fontSize, font: fontBold, color: rgb(0.20, 0.20, 0.20),
+      });
+      page.drawText(pgStr, {
+        x: bx + width - PAD_R - pgW,
+        y: textY, size: fontSize, font, color: rgb(0.20, 0.20, 0.20),
+      });
+    } else {
+      // Default: page number centred (QIR + drawing pages)
+      page.drawText(pgStr, {
+        x: bx + width / 2 - pgW / 2,
+        y: textY, size: fontSize, font, color: rgb(0.20, 0.20, 0.20),
+      });
+    }
   });
 
   return Buffer.from(await pdf.save());
@@ -487,11 +504,10 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
   // p.4+ (or p.3+ if no drawing): remaining QIR pages
   for (let i = 1; i < qirPages.length; i++) merged.addPage(qirPages[i]);
 
-  // Certs
+  // Certs — label in footer on every page, no heading on first page
   for (const cert of certEntries) {
     let bytes = await fitPageToA4Landscape(cert.bytes);
-    bytes     = await stampHeading(bytes, cert.label);
-    bytes     = await stampPageNumbers(bytes, cert.startPage);
+    bytes     = await stampPageNumbers(bytes, cert.startPage, cert.label);
     const cp  = await PDFDocument.load(bytes, { ignoreEncryption: true });
     const pgs = await merged.copyPages(cp, cp.getPageIndices());
     pgs.forEach(p => merged.addPage(p));

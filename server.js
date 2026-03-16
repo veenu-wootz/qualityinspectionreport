@@ -136,7 +136,7 @@ function parsePayload(body) {
     heat_no:         sample.heat_no      || '',
     order_qty:       sample.qty          || '',
     remarks:         sample.remark       || '',
-    verified_by:     sample.verified_by  || '',
+    verified_by:     sample.verified_by  || 'Unverified',
     conclusion:      '',
     
     // Drawing / images

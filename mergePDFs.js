@@ -23,7 +23,7 @@ const fetch = require('node-fetch');
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 
 // ── Logo — fetched once, reused across all requests ──────────
-const LOGO_URL = 'https://storage.googleapis.com/glide-prod.appspot.com/uploads-v2/rIdnwOvTnxdsQUtlXKUB/pub/gfde2QvEVFNokJXJQdEP.png';
+const LOGO_URL = 'https://res.cloudinary.com/dbwg6zz3l/image/upload/v1773643264/Black_Yellow_kq9kef.png';
 let logoPngBytes = null;
 
 async function ensureLogo() {

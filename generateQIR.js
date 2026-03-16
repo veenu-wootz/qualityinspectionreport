@@ -111,7 +111,7 @@ async function generateQIR(data) {
   console.log('  Pre-fetching images...');
   const [inspImage, logoImg] = await Promise.all([
     fetchImageAsDataUrl(data.insp_image),
-    fetchImageAsDataUrl('https://res.cloudinary.com/dbwg6zz3l/image/upload/v1773643264/Black_Yellow_kq9kef.png'),
+    fetchImageAsDataUrl('https://res.cloudinary.com/dbwg6zz3l/image/upload/w_300,f_png,q_90/v1773643264/Black_Yellow_kq9kef.png'),
   ]);
 
   // Fetch dim row QC photos

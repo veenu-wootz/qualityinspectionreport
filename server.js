@@ -136,9 +136,9 @@ function parsePayload(body) {
     heat_no:         sample.heat_no      || '',
     order_qty:       sample.qty          || '',
     remarks:         sample.remark       || '',
+    verified_by:     sample.verified_by  || '',
     conclusion:      '',
-    verified_by: sample.verified_by || '',
-
+    
     // Drawing / images
     part_drawing:    appsheetFileUrl(sample.inspection_map),
     insp_image:      null,

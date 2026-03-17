@@ -20,7 +20,7 @@
  */
 
 const fetch = require('node-fetch');
-const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
+const { PDFDocument, rgb, StandardFonts, PDFName, PDFRawStream } = require('pdf-lib');
 
 // ── Logo — fetched once, reused across all requests ──────────
 const LOGO_URL = 'https://res.cloudinary.com/dbwg6zz3l/image/upload/w_300,f_png,q_90/v1773643264/Black_Yellow_kq9kef.png';
@@ -68,7 +68,6 @@ async function fetchPDF(url) {
 // After this, all pages have origin at bottom-left, /Rotate: 0,
 // so stamping and scaling work correctly regardless of source PDF.
 async function normaliseRotation(pdfBytes) {
-  const { PDFRawStream, PDFName: PDFNameLib } = require('pdf-lib');
   const pdf   = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
   const pages = pdf.getPages();
   let changed = false;

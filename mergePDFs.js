@@ -249,6 +249,8 @@ async function stampPageNumbers(pdfBytes, startPageNum, label = null) {
   const textColor = rgb(0.20, 0.20, 0.20);
 
   pdf.getPages().forEach((page, i) => {
+    const _box = getVisibleBox(page); const _rot = page.getRotation().angle;
+    console.log(`  [stamp] page ${i} rot=${_rot} box={x:${_box.x.toFixed(1)},y:${_box.y.toFixed(1)},w:${_box.width.toFixed(1)},h:${_box.height.toFixed(1)}}`);
     stampFooterOnPage(page, font, fontBold, logoImg,
       String(startPageNum + i), label, barColor, textColor);
   });

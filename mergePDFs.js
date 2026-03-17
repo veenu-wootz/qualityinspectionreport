@@ -68,59 +68,76 @@ async function fetchPDF(url) {
 // After this, all pages have origin at bottom-left, /Rotate: 0,
 // so stamping and scaling work correctly regardless of source PDF.
 async function normaliseRotation(pdfBytes) {
+  const { PDFRawStream, PDFName: PDFNameLib } = require('pdf-lib');
   const pdf   = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
   const pages = pdf.getPages();
   let changed = false;
 
   for (const page of pages) {
     const rotation = page.getRotation().angle;
-    if (rotation === 0) continue;  // nothing to do
+    if (rotation === 0) continue;  // nothing to do — skip entirely
 
     const { width: w, height: h } = page.getMediaBox();
 
-    // Build the transform matrix that corrects the rotation.
-    // PDF content stream uses [a b c d e f] cm operator.
-    // We translate + rotate so content appears upright on a fresh canvas.
-    let matrix;
+    // Build the correcting cm transform matrix for each rotation angle.
+    // After applying, content appears upright with origin at bottom-left.
+    let transformOp;
     if (rotation === 90) {
-      // Content is rotated 90° CW by viewer. Counter-rotate 90° CCW.
-      // New page dims: swap w/h. Matrix: [0 1 -1 0 h 0]
-      matrix = [0, 1, -1, 0, h, 0];
+      // Viewer rotates 90° CW → counter-rotate: [0 1 -1 0 h 0]
+      transformOp = `q
+0 1 -1 0 ${h} 0 cm
+`;
       page.setMediaBox(0, 0, h, w);
       try { page.setCropBox(0, 0, h, w); } catch(_) {}
     } else if (rotation === 180) {
-      // Counter-rotate 180°. Matrix: [-1 0 0 -1 w h]
-      matrix = [-1, 0, 0, -1, w, h];
-      // Dimensions stay the same
+      // Viewer rotates 180° → counter-rotate: [-1 0 0 -1 w h]
+      transformOp = `q
+-1 0 0 -1 ${w} ${h} cm
+`;
+      // Dimensions stay the same for 180°
     } else if (rotation === 270) {
-      // Content is rotated 270° CW by viewer. Counter-rotate 90° CW.
-      // New page dims: swap w/h. Matrix: [0 -1 1 0 0 w]
-      matrix = [0, -1, 1, 0, 0, w];
+      // Viewer rotates 270° CW → counter-rotate: [0 -1 1 0 0 w]
+      transformOp = `q
+0 -1 1 0 0 ${w} cm
+`;
       page.setMediaBox(0, 0, h, w);
       try { page.setCropBox(0, 0, h, w); } catch(_) {}
     } else {
       continue;  // non-standard angle — skip safely
     }
 
-    // Use embedPdf + drawPage to apply the correcting transform reliably.
-    // This avoids direct content stream manipulation which is pdf-lib version sensitive.
-    const pageIdx = pages.indexOf(page);
-    const tmpDoc  = await PDFDocument.create();
-    const [emb]   = await tmpDoc.embedPdf(pdf, [pageIdx]);
-    const nW      = rotation === 90 || rotation === 270 ? h : w;
-    const nH      = rotation === 90 || rotation === 270 ? w : h;
-    const newPage = tmpDoc.addPage([nW, nH]);
-    newPage.drawPage(emb, { x: 0, y: 0, width: nW, height: nH });
-    const tmpBytes = Buffer.from(await tmpDoc.save());
-    const tmpPdf   = await PDFDocument.load(tmpBytes, { ignoreEncryption: true });
-    const [fixed]  = await pdf.copyPages(tmpPdf, [0]);
-    pdf.removePage(pageIdx);
-    pdf.insertPage(pageIdx, fixed);
-    // Refresh pages array entry so loop continues correctly
-    pages[pageIdx] = pdf.getPages()[pageIdx];
+    // Prepend transform to content streams.
+    // Do NOT call wrapContentStreams() — it inserts undefined entries
+    // into the PDFArray causing a crash on pdf.save().
+    const contentsVal = page.node.get(PDFName.of('Contents'));
+    const refs = [];
+    if (contentsVal?.constructor?.name === 'PDFRef') {
+      refs.push(contentsVal);
+    } else if (contentsVal?.constructor?.name === 'PDFArray') {
+      for (let i = 0; i < contentsVal.size(); i++) {
+        const item = contentsVal.get(i);
+        if (item) refs.push(item);
+      }
+    }
 
+    const prefix = new TextEncoder().encode(transformOp);
+    const suffix = new TextEncoder().encode('\nQ\n');
+
+    for (const ref of refs) {
+      const stream = pdf.context.lookup(ref);
+      if (!stream || !(stream instanceof PDFRawStream)) continue;
+      const old    = stream.getContents();
+      const merged = new Uint8Array(prefix.length + old.length + suffix.length);
+      merged.set(prefix, 0);
+      merged.set(old, prefix.length);
+      merged.set(suffix, prefix.length + old.length);
+      stream.contents = merged;
+    }
+
+    // Clear /Rotate
+    page.setRotation({ type: 'degrees', angle: 0 });
     changed = true;
-    console.log(`  normaliseRotation: baked out ${rotation}° rotation on page ${pageIdx + 1}`);
+    console.log(`  normaliseRotation: baked out ${rotation}° on page ${pages.indexOf(page) + 1}`);
   }
 
   return changed ? Buffer.from(await pdf.save()) : pdfBytes;

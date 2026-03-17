@@ -102,35 +102,25 @@ async function normaliseRotation(pdfBytes) {
       continue;  // non-standard angle — skip safely
     }
 
-    // Prepend the correcting transform to the page content stream
-    const [a, b, c, d, e, f] = matrix;
-    const transformOp = `${a} ${b} ${c} ${d} ${e} ${f} cm\n`;
-    const existing    = page.getContentStream ? page.getContentStream() : null;
+    // Use embedPdf + drawPage to apply the correcting transform reliably.
+    // This avoids direct content stream manipulation which is pdf-lib version sensitive.
+    const pageIdx = pages.indexOf(page);
+    const tmpDoc  = await PDFDocument.create();
+    const [emb]   = await tmpDoc.embedPdf(pdf, [pageIdx]);
+    const nW      = rotation === 90 || rotation === 270 ? h : w;
+    const nH      = rotation === 90 || rotation === 270 ? w : h;
+    const newPage = tmpDoc.addPage([nW, nH]);
+    newPage.drawPage(emb, { x: 0, y: 0, width: nW, height: nH });
+    const tmpBytes = Buffer.from(await tmpDoc.save());
+    const tmpPdf   = await PDFDocument.load(tmpBytes, { ignoreEncryption: true });
+    const [fixed]  = await pdf.copyPages(tmpPdf, [0]);
+    pdf.removePage(pageIdx);
+    pdf.insertPage(pageIdx, fixed);
+    // Refresh pages array entry so loop continues correctly
+    pages[pageIdx] = pdf.getPages()[pageIdx];
 
-    // Use pdf-lib's raw content stream access to prepend transform
-    page.node.wrapContentStreams();
-    const streamRef = page.node.get(page.node.PDFName.of('Contents'));
-    if (streamRef) {
-      try {
-        const stream    = pdf.context.lookup(streamRef);
-        const oldBytes  = stream.getContents ? stream.getContents() :
-                          stream.contents    ? stream.contents       : new Uint8Array();
-        const prefix    = new TextEncoder().encode(`q\n${transformOp}`);
-        const suffix    = new TextEncoder().encode('\nQ\n');
-        const newBytes  = new Uint8Array(prefix.length + oldBytes.length + suffix.length);
-        newBytes.set(prefix, 0);
-        newBytes.set(oldBytes, prefix.length);
-        newBytes.set(suffix, prefix.length + oldBytes.length);
-        if (stream.setContents) stream.setContents(newBytes);
-      } catch(e) {
-        console.warn(`  normaliseRotation: content stream manipulation failed — ${e.message}`);
-      }
-    }
-
-    // Clear the /Rotate entry
-    page.setRotation({ type: 'degrees', angle: 0 });
     changed = true;
-    console.log(`  normaliseRotation: baked out ${rotation}° rotation`);
+    console.log(`  normaliseRotation: baked out ${rotation}° rotation on page ${pageIdx + 1}`);
   }
 
   return changed ? Buffer.from(await pdf.save()) : pdfBytes;

@@ -60,15 +60,11 @@ async function fetchPDF(url) {
 }
 
 // ── Rotation-aware footer stamping ───────────────────────────
-// For pages with /Rotate, the viewer rotates the display but raw coordinates
-// stay the same. We must draw the footer bar at the raw edge that corresponds
-// to the VISUAL bottom, with text/logo rotated to read correctly.
-//
-// Visual bottom → raw edge mapping:
-//   0°   → raw bottom  (y = box.y)
-//   90°  → raw left    (x = box.x)           bar is a vertical strip
-//   180° → raw top     (y = box.y + height)
-//   270° → raw right   (x = box.x + width)   bar is a vertical strip
+// PDF /Rotate is counter-clockwise (CCW). Verified mapping from Render logs:
+//   0°   → visual bottom = raw BOTTOM  (y = box.y)
+//   90°  → visual bottom = raw RIGHT   (x = box.x + width)
+//   180° → visual bottom = raw TOP     (y = box.y + height)
+//   270° → visual bottom = raw LEFT    (x = box.x)
 //
 function stampFooterOnPage(page, font, fontBold, logoImg, pgStr, label, barColor, textColor) {
   const box      = getVisibleBox(page);
@@ -76,135 +72,45 @@ function stampFooterOnPage(page, font, fontBold, logoImg, pgStr, label, barColor
   const W        = box.width, H = box.height;
   const rotation = page.getRotation().angle;
 
-  // Use shorter visual dimension for font sizing regardless of rotation
-  const shortSide = rotation === 90 || rotation === 270
-    ? Math.min(W, H)   // raw dims may be swapped visually
-    : Math.min(W, H);
-  const fontSize = Math.round(shortSide * 0.014 * 10) / 10;
-  const barH     = fontSize * 2;
-  const PAD_R    = barH * 0.8;
-  const LOGO_H   = barH * 0.72;
-  const LOGO_PAD = barH * 0.14;
+  const shortSide = Math.min(W, H);
+  const fontSize  = Math.round(shortSide * 0.014 * 10) / 10;
+  const barH      = fontSize * 2;
+  const PAD_R     = barH * 0.8;
+  const LOGO_H    = barH * 0.72;
+  const LOGO_PAD  = barH * 0.14;
 
   if (rotation === 0) {
-    // ── Standard: bar at raw bottom ──────────────────────────
+    // ── Bar at raw BOTTOM ─────────────────────────────────────
     page.drawRectangle({ x: bx, y: by, width: W, height: barH, color: barColor, opacity: 1.0 });
-
     if (logoImg) {
       try {
-        const logoDims = logoImg.scale(1);
-        const s = LOGO_H / logoDims.height;
-        page.drawImage(logoImg, { x: bx + LOGO_PAD, y: by + LOGO_PAD, width: logoDims.width * s, height: LOGO_H });
+        const dims = logoImg.scale(1);
+        const s    = LOGO_H / dims.height;
+        page.drawImage(logoImg, { x: bx + LOGO_PAD, y: by + LOGO_PAD, width: dims.width * s, height: LOGO_H });
       } catch(e) {}
     }
-
     const textY = by + barH * 0.28;
     if (label) {
       const labelW = fontBold.widthOfTextAtSize(label, fontSize);
       page.drawText(label, { x: bx + W / 2 - labelW / 2, y: textY, size: fontSize, font: fontBold, color: textColor });
-      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
-      page.drawText(pgStr, { x: bx + W - PAD_R - pgW, y: textY, size: fontSize, font, color: textColor });
-    } else {
-      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
-      page.drawText(pgStr, { x: bx + W - PAD_R - pgW, y: textY, size: fontSize, font, color: textColor });
     }
+    const pgW = font.widthOfTextAtSize(pgStr, fontSize);
+    page.drawText(pgStr, { x: bx + W - PAD_R - pgW, y: textY, size: fontSize, font, color: textColor });
 
   } else if (rotation === 90) {
-    // ── 90°: visual bottom = raw LEFT edge ───────────────────
-    // Bar is a vertical strip on the left side of the raw page
-    page.drawRectangle({ x: bx, y: by, width: barH, height: H, color: barColor, opacity: 1.0 });
-
-    // Logo — rotated 90° CCW to read correctly when page is rotated 90° CW
-    if (logoImg) {
-      try {
-        const logoDims = logoImg.scale(1);
-        const s  = LOGO_H / logoDims.height;
-        const lw = logoDims.width * s;
-        page.drawImage(logoImg, {
-          x: bx + LOGO_PAD + LOGO_H, y: by + LOGO_PAD,
-          width: lw, height: LOGO_H,
-          rotate: degrees(90),
-        });
-      } catch(e) {}
-    }
-
-    const textX = bx + barH * 0.28;
-    if (label) {
-      const labelW = fontBold.widthOfTextAtSize(label, fontSize);
-      page.drawText(label, {
-        x: textX, y: by + H / 2 - labelW / 2,
-        size: fontSize, font: fontBold, color: textColor, rotate: degrees(90),
-      });
-      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
-      page.drawText(pgStr, {
-        x: textX, y: by + PAD_R + pgW,
-        size: fontSize, font, color: textColor, rotate: degrees(90),
-      });
-    } else {
-      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
-      page.drawText(pgStr, {
-        x: textX, y: by + PAD_R + pgW,
-        size: fontSize, font, color: textColor, rotate: degrees(90),
-      });
-    }
-
-  } else if (rotation === 180) {
-    // ── 180°: visual bottom = raw TOP edge ───────────────────
-    const barY = by + H - barH;
-    page.drawRectangle({ x: bx, y: barY, width: W, height: barH, color: barColor, opacity: 1.0 });
-
-    if (logoImg) {
-      try {
-        const logoDims = logoImg.scale(1);
-        const s  = LOGO_H / logoDims.height;
-        const lw = logoDims.width * s;
-        // Rotated 180° — logo appears at right side reading correctly
-        page.drawImage(logoImg, {
-          x: bx + W - LOGO_PAD, y: barY + barH - LOGO_PAD,
-          width: lw, height: LOGO_H,
-          rotate: degrees(180),
-        });
-      } catch(e) {}
-    }
-
-    const textY = barY + barH - barH * 0.28 - fontSize;
-    if (label) {
-      const labelW = fontBold.widthOfTextAtSize(label, fontSize);
-      page.drawText(label, {
-        x: bx + W / 2 + labelW / 2, y: textY,
-        size: fontSize, font: fontBold, color: textColor, rotate: degrees(180),
-      });
-      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
-      page.drawText(pgStr, {
-        x: bx + PAD_R + pgW, y: textY,
-        size: fontSize, font, color: textColor, rotate: degrees(180),
-      });
-    } else {
-      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
-      page.drawText(pgStr, {
-        x: bx + PAD_R + pgW, y: textY,
-        size: fontSize, font, color: textColor, rotate: degrees(180),
-      });
-    }
-
-  } else if (rotation === 270) {
-    // ── 270°: visual bottom = raw RIGHT edge ─────────────────
+    // ── /Rotate 90 CCW → visual bottom = raw RIGHT edge ───────
     const barX = bx + W - barH;
     page.drawRectangle({ x: barX, y: by, width: barH, height: H, color: barColor, opacity: 1.0 });
-
     if (logoImg) {
       try {
-        const logoDims = logoImg.scale(1);
-        const s  = LOGO_H / logoDims.height;
-        const lw = logoDims.width * s;
+        const dims = logoImg.scale(1);
+        const s    = LOGO_H / dims.height;
         page.drawImage(logoImg, {
-          x: barX + barH - LOGO_PAD, y: by + H - LOGO_PAD,
-          width: lw, height: LOGO_H,
-          rotate: degrees(270),
+          x: barX + LOGO_PAD, y: by + H - LOGO_PAD,
+          width: dims.width * s, height: LOGO_H, rotate: degrees(270),
         });
       } catch(e) {}
     }
-
     const textX = barX + barH - barH * 0.28;
     if (label) {
       const labelW = fontBold.widthOfTextAtSize(label, fontSize);
@@ -212,26 +118,76 @@ function stampFooterOnPage(page, font, fontBold, logoImg, pgStr, label, barColor
         x: textX, y: by + H / 2 + labelW / 2,
         size: fontSize, font: fontBold, color: textColor, rotate: degrees(270),
       });
-      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
-      page.drawText(pgStr, {
-        x: textX, y: by + H - PAD_R,
-        size: fontSize, font, color: textColor, rotate: degrees(270),
-      });
-    } else {
-      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
-      page.drawText(pgStr, {
-        x: textX, y: by + H - PAD_R,
-        size: fontSize, font, color: textColor, rotate: degrees(270),
+    }
+    const pgW = font.widthOfTextAtSize(pgStr, fontSize);
+    page.drawText(pgStr, {
+      x: textX, y: by + PAD_R + pgW,
+      size: fontSize, font, color: textColor, rotate: degrees(270),
+    });
+
+  } else if (rotation === 180) {
+    // ── /Rotate 180 → visual bottom = raw TOP edge ────────────
+    const barY = by + H - barH;
+    page.drawRectangle({ x: bx, y: barY, width: W, height: barH, color: barColor, opacity: 1.0 });
+    if (logoImg) {
+      try {
+        const dims = logoImg.scale(1);
+        const s    = LOGO_H / dims.height;
+        page.drawImage(logoImg, {
+          x: bx + W - LOGO_PAD, y: barY + barH - LOGO_PAD,
+          width: dims.width * s, height: LOGO_H, rotate: degrees(180),
+        });
+      } catch(e) {}
+    }
+    const textY = barY + barH - barH * 0.28 - fontSize;
+    if (label) {
+      const labelW = fontBold.widthOfTextAtSize(label, fontSize);
+      page.drawText(label, {
+        x: bx + W / 2 + labelW / 2, y: textY,
+        size: fontSize, font: fontBold, color: textColor, rotate: degrees(180),
       });
     }
+    const pgW = font.widthOfTextAtSize(pgStr, fontSize);
+    page.drawText(pgStr, {
+      x: bx + PAD_R + pgW, y: textY,
+      size: fontSize, font, color: textColor, rotate: degrees(180),
+    });
+
+  } else if (rotation === 270) {
+    // ── /Rotate 270 CCW → visual bottom = raw LEFT edge ───────
+    page.drawRectangle({ x: bx, y: by, width: barH, height: H, color: barColor, opacity: 1.0 });
+    if (logoImg) {
+      try {
+        const dims = logoImg.scale(1);
+        const s    = LOGO_H / dims.height;
+        page.drawImage(logoImg, {
+          x: bx + barH - LOGO_PAD, y: by + LOGO_PAD,
+          width: dims.width * s, height: LOGO_H, rotate: degrees(90),
+        });
+      } catch(e) {}
+    }
+    const textX = bx + barH * 0.28;
+    if (label) {
+      const labelW = fontBold.widthOfTextAtSize(label, fontSize);
+      page.drawText(label, {
+        x: textX, y: by + H / 2 - labelW / 2,
+        size: fontSize, font: fontBold, color: textColor, rotate: degrees(90),
+      });
+    }
+    const pgW = font.widthOfTextAtSize(pgStr, fontSize);
+    page.drawText(pgStr, {
+      x: textX, y: by + H - PAD_R,
+      size: fontSize, font, color: textColor, rotate: degrees(90),
+    });
 
   } else {
-    // Non-standard rotation — fall back to raw bottom, best effort
+    // Non-standard rotation — fall back to raw bottom
     page.drawRectangle({ x: bx, y: by, width: W, height: barH, color: barColor, opacity: 1.0 });
     const pgW = font.widthOfTextAtSize(pgStr, fontSize);
     page.drawText(pgStr, { x: bx + W - PAD_R - pgW, y: by + barH * 0.28, size: fontSize, font, color: textColor });
   }
 }
+
 
 // ── Stamp page number + logo on every page of a PDF ──────────
 async function stampPageNumbers(pdfBytes, startPageNum, label = null) {
@@ -249,8 +205,6 @@ async function stampPageNumbers(pdfBytes, startPageNum, label = null) {
   const textColor = rgb(0.20, 0.20, 0.20);
 
   pdf.getPages().forEach((page, i) => {
-    const _box = getVisibleBox(page); const _rot = page.getRotation().angle;
-    console.log(`  [stamp] page ${i} rot=${_rot} box={x:${_box.x.toFixed(1)},y:${_box.y.toFixed(1)},w:${_box.width.toFixed(1)},h:${_box.height.toFixed(1)}}`);
     stampFooterOnPage(page, font, fontBold, logoImg,
       String(startPageNum + i), label, barColor, textColor);
   });

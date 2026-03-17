@@ -20,7 +20,7 @@
  */
 
 const fetch = require('node-fetch');
-const { PDFDocument, rgb, StandardFonts, PDFName, PDFRawStream, decodePDFRawStream } = require('pdf-lib');
+const { PDFDocument, rgb, StandardFonts, degrees } = require('pdf-lib');
 
 // ── Logo — fetched once, reused across all requests ──────────
 const LOGO_URL = 'https://res.cloudinary.com/dbwg6zz3l/image/upload/w_300,f_png,q_90/v1773643264/Black_Yellow_kq9kef.png';
@@ -41,8 +41,6 @@ async function ensureLogo() {
 }
 
 // ── Bulletproof visible-area helper ──────────────────────────
-// CropBox defines what viewers actually display.
-// Falls back to MediaBox if CropBox is absent.
 function getVisibleBox(page) {
   try {
     const crop = page.getCropBox();
@@ -61,91 +59,178 @@ async function fetchPDF(url) {
   return Buffer.from(await res.arrayBuffer());
 }
 
-// ── Normalise page rotation ───────────────────────────────────
-// Bakes out /Rotate entries (90, 180, 270) by physically transforming
-// the content stream and resetting /Rotate to 0.
-// Pages with /Rotate 0 or non-standard angles are left untouched.
-// After this, all pages have origin at bottom-left, /Rotate: 0,
-// so stamping and scaling work correctly regardless of source PDF.
-async function normaliseRotation(pdfBytes) {
-  const pdf   = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
-  const pages = pdf.getPages();
-  let changed = false;
+// ── Rotation-aware footer stamping ───────────────────────────
+// For pages with /Rotate, the viewer rotates the display but raw coordinates
+// stay the same. We must draw the footer bar at the raw edge that corresponds
+// to the VISUAL bottom, with text/logo rotated to read correctly.
+//
+// Visual bottom → raw edge mapping:
+//   0°   → raw bottom  (y = box.y)
+//   90°  → raw left    (x = box.x)           bar is a vertical strip
+//   180° → raw top     (y = box.y + height)
+//   270° → raw right   (x = box.x + width)   bar is a vertical strip
+//
+function stampFooterOnPage(page, font, fontBold, logoImg, pgStr, label, barColor, textColor) {
+  const box      = getVisibleBox(page);
+  const bx       = box.x, by = box.y;
+  const W        = box.width, H = box.height;
+  const rotation = page.getRotation().angle;
 
-  for (const page of pages) {
-    const rotation = page.getRotation().angle;
-    if (rotation === 0) continue;  // nothing to do — skip entirely
+  // Use shorter visual dimension for font sizing regardless of rotation
+  const shortSide = rotation === 90 || rotation === 270
+    ? Math.min(W, H)   // raw dims may be swapped visually
+    : Math.min(W, H);
+  const fontSize = Math.round(shortSide * 0.014 * 10) / 10;
+  const barH     = fontSize * 2;
+  const PAD_R    = barH * 0.8;
+  const LOGO_H   = barH * 0.72;
+  const LOGO_PAD = barH * 0.14;
 
-    const { width: w, height: h } = page.getMediaBox();
+  if (rotation === 0) {
+    // ── Standard: bar at raw bottom ──────────────────────────
+    page.drawRectangle({ x: bx, y: by, width: W, height: barH, color: barColor, opacity: 1.0 });
 
-    // Build the correcting cm transform matrix for each rotation angle.
-    // After applying, content appears upright with origin at bottom-left.
-    let transformOp;
-    if (rotation === 90) {
-      // Viewer rotates 90° CW → counter-rotate: [0 1 -1 0 h 0]
-      transformOp = `q
-0 1 -1 0 ${h} 0 cm
-`;
-      page.setMediaBox(0, 0, h, w);
-      try { page.setCropBox(0, 0, h, w); } catch(_) {}
-    } else if (rotation === 180) {
-      // Viewer rotates 180° → counter-rotate: [-1 0 0 -1 w h]
-      transformOp = `q
--1 0 0 -1 ${w} ${h} cm
-`;
-      // Dimensions stay the same for 180°
-    } else if (rotation === 270) {
-      // Viewer rotates 270° CW → counter-rotate: [0 -1 1 0 0 w]
-      transformOp = `q
-0 -1 1 0 0 ${w} cm
-`;
-      page.setMediaBox(0, 0, h, w);
-      try { page.setCropBox(0, 0, h, w); } catch(_) {}
+    if (logoImg) {
+      try {
+        const logoDims = logoImg.scale(1);
+        const s = LOGO_H / logoDims.height;
+        page.drawImage(logoImg, { x: bx + LOGO_PAD, y: by + LOGO_PAD, width: logoDims.width * s, height: LOGO_H });
+      } catch(e) {}
+    }
+
+    const textY = by + barH * 0.28;
+    if (label) {
+      const labelW = fontBold.widthOfTextAtSize(label, fontSize);
+      page.drawText(label, { x: bx + W / 2 - labelW / 2, y: textY, size: fontSize, font: fontBold, color: textColor });
+      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
+      page.drawText(pgStr, { x: bx + W - PAD_R - pgW, y: textY, size: fontSize, font, color: textColor });
     } else {
-      continue;  // non-standard angle — skip safely
+      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
+      page.drawText(pgStr, { x: bx + W - PAD_R - pgW, y: textY, size: fontSize, font, color: textColor });
     }
 
-    // Prepend transform to content streams.
-    // Do NOT call wrapContentStreams() — it inserts undefined entries
-    // into the PDFArray causing a crash on pdf.save().
-    const contentsVal = page.node.get(PDFName.of('Contents'));
-    const refs = [];
-    if (contentsVal?.constructor?.name === 'PDFRef') {
-      refs.push(contentsVal);
-    } else if (contentsVal?.constructor?.name === 'PDFArray') {
-      for (let i = 0; i < contentsVal.size(); i++) {
-        const item = contentsVal.get(i);
-        if (item) refs.push(item);
-      }
+  } else if (rotation === 90) {
+    // ── 90°: visual bottom = raw LEFT edge ───────────────────
+    // Bar is a vertical strip on the left side of the raw page
+    page.drawRectangle({ x: bx, y: by, width: barH, height: H, color: barColor, opacity: 1.0 });
+
+    // Logo — rotated 90° CCW to read correctly when page is rotated 90° CW
+    if (logoImg) {
+      try {
+        const logoDims = logoImg.scale(1);
+        const s  = LOGO_H / logoDims.height;
+        const lw = logoDims.width * s;
+        page.drawImage(logoImg, {
+          x: bx + LOGO_PAD + LOGO_H, y: by + LOGO_PAD,
+          width: lw, height: LOGO_H,
+          rotate: degrees(90),
+        });
+      } catch(e) {}
     }
 
-    const prefix = new TextEncoder().encode(transformOp);
-    const suffix = new TextEncoder().encode('\nQ\n');
-
-    for (const ref of refs) {
-      const stream = pdf.context.lookup(ref);
-      if (!stream || !(stream instanceof PDFRawStream)) continue;
-      // Decode (decompress) the stream first before prepending transform.
-      // getContents() returns raw compressed bytes — mixing plain text with
-      // compressed data produces a blank page. decodePDFRawStream decompresses.
-      const decoded = decodePDFRawStream(stream).decode();
-      const merged  = new Uint8Array(prefix.length + decoded.length + suffix.length);
-      merged.set(prefix, 0);
-      merged.set(decoded, prefix.length);
-      merged.set(suffix, prefix.length + decoded.length);
-      stream.contents = merged;
-      // Remove Filter/DecodeParms — content is now plain uncompressed text
-      stream.dict.delete(PDFName.of('Filter'));
-      stream.dict.delete(PDFName.of('DecodeParms'));
+    const textX = bx + barH * 0.28;
+    if (label) {
+      const labelW = fontBold.widthOfTextAtSize(label, fontSize);
+      page.drawText(label, {
+        x: textX, y: by + H / 2 - labelW / 2,
+        size: fontSize, font: fontBold, color: textColor, rotate: degrees(90),
+      });
+      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
+      page.drawText(pgStr, {
+        x: textX, y: by + PAD_R + pgW,
+        size: fontSize, font, color: textColor, rotate: degrees(90),
+      });
+    } else {
+      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
+      page.drawText(pgStr, {
+        x: textX, y: by + PAD_R + pgW,
+        size: fontSize, font, color: textColor, rotate: degrees(90),
+      });
     }
 
-    // Clear /Rotate
-    page.setRotation({ type: 'degrees', angle: 0 });
-    changed = true;
-    console.log(`  normaliseRotation: baked out ${rotation}° on page ${pages.indexOf(page) + 1}`);
+  } else if (rotation === 180) {
+    // ── 180°: visual bottom = raw TOP edge ───────────────────
+    const barY = by + H - barH;
+    page.drawRectangle({ x: bx, y: barY, width: W, height: barH, color: barColor, opacity: 1.0 });
+
+    if (logoImg) {
+      try {
+        const logoDims = logoImg.scale(1);
+        const s  = LOGO_H / logoDims.height;
+        const lw = logoDims.width * s;
+        // Rotated 180° — logo appears at right side reading correctly
+        page.drawImage(logoImg, {
+          x: bx + W - LOGO_PAD, y: barY + barH - LOGO_PAD,
+          width: lw, height: LOGO_H,
+          rotate: degrees(180),
+        });
+      } catch(e) {}
+    }
+
+    const textY = barY + barH - barH * 0.28 - fontSize;
+    if (label) {
+      const labelW = fontBold.widthOfTextAtSize(label, fontSize);
+      page.drawText(label, {
+        x: bx + W / 2 + labelW / 2, y: textY,
+        size: fontSize, font: fontBold, color: textColor, rotate: degrees(180),
+      });
+      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
+      page.drawText(pgStr, {
+        x: bx + PAD_R + pgW, y: textY,
+        size: fontSize, font, color: textColor, rotate: degrees(180),
+      });
+    } else {
+      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
+      page.drawText(pgStr, {
+        x: bx + PAD_R + pgW, y: textY,
+        size: fontSize, font, color: textColor, rotate: degrees(180),
+      });
+    }
+
+  } else if (rotation === 270) {
+    // ── 270°: visual bottom = raw RIGHT edge ─────────────────
+    const barX = bx + W - barH;
+    page.drawRectangle({ x: barX, y: by, width: barH, height: H, color: barColor, opacity: 1.0 });
+
+    if (logoImg) {
+      try {
+        const logoDims = logoImg.scale(1);
+        const s  = LOGO_H / logoDims.height;
+        const lw = logoDims.width * s;
+        page.drawImage(logoImg, {
+          x: barX + barH - LOGO_PAD, y: by + H - LOGO_PAD,
+          width: lw, height: LOGO_H,
+          rotate: degrees(270),
+        });
+      } catch(e) {}
+    }
+
+    const textX = barX + barH - barH * 0.28;
+    if (label) {
+      const labelW = fontBold.widthOfTextAtSize(label, fontSize);
+      page.drawText(label, {
+        x: textX, y: by + H / 2 + labelW / 2,
+        size: fontSize, font: fontBold, color: textColor, rotate: degrees(270),
+      });
+      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
+      page.drawText(pgStr, {
+        x: textX, y: by + H - PAD_R,
+        size: fontSize, font, color: textColor, rotate: degrees(270),
+      });
+    } else {
+      const pgW = font.widthOfTextAtSize(pgStr, fontSize);
+      page.drawText(pgStr, {
+        x: textX, y: by + H - PAD_R,
+        size: fontSize, font, color: textColor, rotate: degrees(270),
+      });
+    }
+
+  } else {
+    // Non-standard rotation — fall back to raw bottom, best effort
+    page.drawRectangle({ x: bx, y: by, width: W, height: barH, color: barColor, opacity: 1.0 });
+    const pgW = font.widthOfTextAtSize(pgStr, fontSize);
+    page.drawText(pgStr, { x: bx + W - PAD_R - pgW, y: by + barH * 0.28, size: fontSize, font, color: textColor });
   }
-
-  return changed ? Buffer.from(await pdf.save()) : pdfBytes;
 }
 
 // ── Stamp page number + logo on every page of a PDF ──────────
@@ -160,55 +245,12 @@ async function stampPageNumbers(pdfBytes, startPageNum, label = null) {
     try { logoImg = await pdf.embedPng(logoBytes); } catch(e) {}
   }
 
+  const barColor  = rgb(0.96, 0.96, 0.96);
+  const textColor = rgb(0.20, 0.20, 0.20);
+
   pdf.getPages().forEach((page, i) => {
-    const box   = getVisibleBox(page);
-    const bx    = box.x, by = box.y;
-    const width = box.width, height = box.height;
-
-    const shortSide = Math.min(width, height);
-    const fontSize  = Math.round(shortSide * 0.014 * 10) / 10;
-    const barH      = fontSize * 2;
-
-    page.drawRectangle({ x: bx, y: by, width, height: barH,
-      color: rgb(0.96, 0.96, 0.96), opacity: 1.0 });
-
-    if (logoImg) {
-      try {
-        const LOGO_H   = barH * 0.72;
-        const LOGO_PAD = barH * 0.14;
-        const logoDims = logoImg.scale(1);
-        const scale    = LOGO_H / logoDims.height;
-        const lw       = logoDims.width * scale;
-        page.drawImage(logoImg, {
-          x: bx + LOGO_PAD, y: by + LOGO_PAD,
-          width: lw, height: LOGO_H,
-        });
-      } catch(e) {}
-    }
-
-    const pgStr = String(startPageNum + i);
-    const pgW   = font.widthOfTextAtSize(pgStr, fontSize);
-    const textY = by + barH * 0.28;
-    const PAD_R = barH * 0.8;
-
-    if (label) {
-      // Label centred on every page, page number right-aligned
-      const labelW = fontBold.widthOfTextAtSize(label, fontSize);
-      page.drawText(label, {
-        x: bx + width / 2 - labelW / 2,
-        y: textY, size: fontSize, font: fontBold, color: rgb(0.20, 0.20, 0.20),
-      });
-      page.drawText(pgStr, {
-        x: bx + width - PAD_R - pgW,
-        y: textY, size: fontSize, font, color: rgb(0.20, 0.20, 0.20),
-      });
-    } else {
-      // Default: page number right-aligned
-      page.drawText(pgStr, {
-        x: bx + width - PAD_R - pgW,
-        y: textY, size: fontSize, font, color: rgb(0.20, 0.20, 0.20),
-      });
-    }
+    stampFooterOnPage(page, font, fontBold, logoImg,
+      String(startPageNum + i), label, barColor, textColor);
   });
 
   return Buffer.from(await pdf.save());
@@ -243,23 +285,17 @@ async function stampHeading(pdfBytes, label) {
 }
 
 // ── Prepare drawing page: stamp heading + footer, return single-page PDF ──
-// Fetches the drawing PDF, takes only page 1, stamps "Part Drawing"
-// heading and page number + logo footer, returns stamped bytes.
 async function prepareDrawingPage(drawingUrl, pageNum) {
   console.log(`  Fetching drawing PDF: ${String(drawingUrl).substring(0, 70)}...`);
   const rawBytes  = await fetchPDF(drawingUrl);
 
-  // Extract only page 1 into a new single-page document
   const srcPdf    = await PDFDocument.load(rawBytes, { ignoreEncryption: true });
   const singleDoc = await PDFDocument.create();
   const [page1]   = await singleDoc.copyPages(srcPdf, [0]);
   singleDoc.addPage(page1);
   let drawingBytes = Buffer.from(await singleDoc.save());
 
-  // Stamp heading "Part Drawing"
   drawingBytes = await stampHeading(drawingBytes, 'Part Drawing');
-
-  // Stamp page number + logo footer
   drawingBytes = await stampPageNumbers(drawingBytes, pageNum);
 
   console.log(`  Drawing page prepared (final p.${pageNum})`);
@@ -273,50 +309,27 @@ async function prepareDrawingPage(drawingUrl, pageNum) {
 //   - If both dimensions within target   → no scaling, just centre
 //   - In both cases: set page to target size, white background, content centred
 //   - Never scales up (scale capped at 1.0)
-// NOTE: Call normaliseRotation() before this to ensure correct orientation.
+// NOTE: kept for future use — not currently called
 const TARGET_W = 841.89;
 const TARGET_H = 595.28;
 
 async function fitPageToA4Landscape(pdfBytes) {
-  // We rebuild each page into a new PDF, embedding the original as an XObject.
-  // This is the most reliable way to scale+centre PDF page content in pdf-lib
-  // without wrestling with raw content stream transforms.
   const srcPdf  = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
   const outPdf  = await PDFDocument.create();
 
   for (let i = 0; i < srcPdf.getPageCount(); i++) {
-    // Embed the source page as an XObject (form) in the output PDF
     const [embedded] = await outPdf.embedPdf(srcPdf, [i]);
-
     const srcPage = srcPdf.getPages()[i];
     const pageW   = srcPage.getWidth();
     const pageH   = srcPage.getHeight();
-
-    // Uniform scale — capped at 1.0 (never upscale)
     const scale   = Math.min(TARGET_W / pageW, TARGET_H / pageH, 1.0);
     const scaledW = pageW  * scale;
     const scaledH = pageH  * scale;
-
-    // Offset to centre scaled content on target page
     const offsetX = (TARGET_W - scaledW) / 2;
     const offsetY = (TARGET_H - scaledH) / 2;
-
-    // Create a fresh A4 landscape page
     const newPage = outPdf.addPage([TARGET_W, TARGET_H]);
-
-    // White background
-    newPage.drawRectangle({
-      x: 0, y: 0, width: TARGET_W, height: TARGET_H,
-      color: rgb(1, 1, 1), opacity: 1.0,
-    });
-
-    // Draw the embedded page content, scaled and centred
-    newPage.drawPage(embedded, {
-      x: offsetX, y: offsetY,
-      width:  scaledW,
-      height: scaledH,
-      opacity: 1.0,
-    });
+    newPage.drawRectangle({ x: 0, y: 0, width: TARGET_W, height: TARGET_H, color: rgb(1, 1, 1), opacity: 1.0 });
+    newPage.drawPage(embedded, { x: offsetX, y: offsetY, width: scaledW, height: scaledH, opacity: 1.0 });
   }
 
   return Buffer.from(await outPdf.save());
@@ -340,15 +353,12 @@ async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
 
   page.drawRectangle({ x: 0, y: 0, width: W, height: H, color: rgb(1, 1, 1) });
 
-  // Footer bar (same style as all other pages)
   const shortSide    = Math.min(W, H);
   const PG_FONT_SIZE = Math.round(shortSide * 0.014 * 10) / 10;
   const PG_BAR_H     = PG_FONT_SIZE * 2;
 
-  page.drawRectangle({ x: 0, y: 0, width: W, height: PG_BAR_H,
-    color: rgb(0.96, 0.96, 0.96), opacity: 1.0 });
+  page.drawRectangle({ x: 0, y: 0, width: W, height: PG_BAR_H, color: rgb(0.96, 0.96, 0.96), opacity: 1.0 });
 
-  // Logo in footer bar
   const logoBytes = await ensureLogo();
   const LOGO_H    = PG_BAR_H * 0.72;
   const LOGO_PAD  = PG_BAR_H * 0.14;
@@ -362,7 +372,6 @@ async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
     } catch(e) {}
   }
 
-  // Page number right-aligned in footer
   const p2Str = '2';
   const p2W   = fontNormal.widthOfTextAtSize(p2Str, PG_FONT_SIZE);
   page.drawText(p2Str, {
@@ -370,12 +379,10 @@ async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
     size: PG_FONT_SIZE, font: fontNormal, color: rgb(0.20, 0.20, 0.20),
   });
 
-  // Title
   const tocLabel = 'Table of Content';
   const tocW = fontBold.widthOfTextAtSize(tocLabel, 11);
   page.drawText(tocLabel, { x: W / 2 - tocW / 2, y: H - 52, size: 11, font: fontBold, color: BLACK });
 
-  // Table
   const TBL_X = 40, TBL_W = W - 80, PAD = 10, ROW_H = 24;
   let rowY = H - 72;
   const tableTopY = rowY;
@@ -385,13 +392,11 @@ async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
     page.drawRectangle({ x: TBL_X, y: rowY - ROW_H, width: TBL_W, height: ROW_H, color: bg });
     page.drawLine({ start: { x: TBL_X, y: rowY - ROW_H }, end: { x: TBL_X + TBL_W, y: rowY - ROW_H },
       thickness: 0.3, color: LGRAY });
-
     const indent   = isSub ? 18 : 0;
     const fontSize = isHeader ? 8.5 : 8;
     const font     = isHeader ? fontBold : fontNormal;
     const color    = isHeader ? BLACK : isSub ? MGRAY : DGRAY;
     const textY    = rowY - ROW_H + (ROW_H - fontSize) / 2 + 1;
-
     page.drawText(String(label), { x: TBL_X + PAD + indent, y: textY, size: fontSize, font, color });
     const pgStr = String(pageNum);
     const pgW   = (isHeader ? fontBold : fontNormal).widthOfTextAtSize(pgStr, fontSize);
@@ -400,18 +405,14 @@ async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
     rowY -= ROW_H;
   }
 
-  page.drawLine({ start: { x: TBL_X, y: tableTopY }, end: { x: TBL_X + TBL_W, y: tableTopY },
-    thickness: 0.6, color: DGRAY });
+  page.drawLine({ start: { x: TBL_X, y: tableTopY }, end: { x: TBL_X + TBL_W, y: tableTopY }, thickness: 0.6, color: DGRAY });
 
   drawRow('Section', 'Page', false, true);
   drawRow('Part Information', 1);
   drawRow('Content Table', 2);
 
   let nextQirPage = hasDrawing ? 4 : 3;
-
-  if (hasDrawing) {
-    drawRow('Part Drawing', 3);
-  }
+  if (hasDrawing) drawRow('Part Drawing', 3);
 
   if (certEntries._hasDim || certEntries._hasVis) {
     drawRow('Inspection', nextQirPage);
@@ -419,7 +420,6 @@ async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
     if (certEntries._hasVis) drawRow('Visual Inspection',      '', true);
   }
 
-  // Cert start: QIR pages + 1 (index) + 1 (drawing, if present) + 1 (base offset)
   const certStart = qirPageCount + 1 + (hasDrawing ? 1 : 0) + 1;
   drawRow('Tests & Certificates', certEntries.length > 0 ? certStart : '—');
   for (const c of certEntries) drawRow(c.label, c.startPage, true);
@@ -440,7 +440,6 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
   const hasDrawing   = !!meta.partDrawingUrl;
   console.log(`  QIR pages: ${qirPageCount}, hasDrawing: ${hasDrawing}`);
 
-  // Fetch drawing page and cert PDFs in parallel
   const [drawingResult, ...certResults] = await Promise.allSettled([
     hasDrawing ? fetchPDF(meta.partDrawingUrl) : Promise.resolve(null),
     ...certs.filter(c => c && c.url && c.url.trim()).map(async (cert) => {
@@ -451,7 +450,6 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
     }),
   ]);
 
-  // Drawing raw bytes (not yet stamped — we need page numbers first)
   let drawingRawBytes = null;
   if (hasDrawing) {
     if (drawingResult.status === 'fulfilled' && drawingResult.value) {
@@ -461,14 +459,12 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
     }
   }
 
-  // Cert data
   const certData = [];
   for (const r of certResults) {
     if (r.status === 'fulfilled') certData.push(r.value);
     else console.error(`  Cert fetch failed: ${r.reason?.message}`);
   }
 
-  // ── Page number layout ────────────────────────────────────────
   const drawingPageNum  = 3;
   const qirRemapOffset  = hasDrawing ? 3 : 2;
   const certStartPage   = qirPageCount + 1 + (hasDrawing ? 1 : 0) + 1;
@@ -485,11 +481,9 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
 
   console.log(`  Page layout: QIR(${qirPageCount}) + Index + ${hasDrawing ? 'Drawing + ' : ''}Certs → total ~${runningPage - 1}`);
 
-  // Build index page
   console.log('  Building index page...');
   const indexBytes = await buildIndexPage({ qirPageCount, hasDrawing, certEntries });
 
-  // Stamp QIR pages
   const qirForStamp = await PDFDocument.load(qirBuffer, { ignoreEncryption: true });
   const qirFont     = await qirForStamp.embedFont(StandardFonts.Helvetica);
   const logoBytes   = logoPngBytes;
@@ -507,8 +501,7 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
     const fontSize  = Math.round(shortSide * 0.014 * 10) / 10;
     const barH      = fontSize * 2;
 
-    page.drawRectangle({ x: bx, y: by, width, height: barH,
-      color: rgb(0.96, 0.96, 0.96), opacity: 1.0 });
+    page.drawRectangle({ x: bx, y: by, width, height: barH, color: rgb(0.96, 0.96, 0.96), opacity: 1.0 });
 
     if (qirLogoImg) {
       try {
@@ -532,27 +525,19 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
   });
   const qirNumbered = Buffer.from(await qirForStamp.save());
 
-  // Prepare drawing page (stamp heading + footer)
   let drawingStamped = null;
   if (drawingRawBytes) {
     try {
-      // Extract only page 1 into its own document first
       const srcPdf    = await PDFDocument.load(drawingRawBytes, { ignoreEncryption: true });
       const singleDoc = await PDFDocument.create();
       const [pg1]     = await singleDoc.copyPages(srcPdf, [0]);
       singleDoc.addPage(pg1);
       let drawBytes   = Buffer.from(await singleDoc.save());
 
-      // Normalise rotation (bake out /Rotate so stamping lands correctly)
-      drawBytes = await normaliseRotation(drawBytes);
-
       // Fit to A4 landscape (scale down if needed, centre, white background)
       // drawBytes = await fitPageToA4Landscape(drawBytes);
 
-      // Stamp heading "Part Drawing" at top
       drawBytes = await stampHeading(drawBytes, 'Part Drawing');
-
-      // Stamp page number + logo at bottom (page 3)
       drawBytes = await stampPageNumbers(drawBytes, drawingPageNum);
 
       drawingStamped = drawBytes;
@@ -562,36 +547,31 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
     }
   }
 
-  // ── Final merge ───────────────────────────────────────────────
   console.log('  Merging...');
   const merged   = await PDFDocument.create();
   const qirFinal = await PDFDocument.load(qirNumbered, { ignoreEncryption: true });
   const qirPages = await merged.copyPages(qirFinal, qirFinal.getPageIndices());
 
-  // p.1: QIR page 1
   merged.addPage(qirPages[0]);
 
-  // p.2: Index
   const idxPdf    = await PDFDocument.load(indexBytes);
   const [idxPage] = await merged.copyPages(idxPdf, [0]);
   merged.addPage(idxPage);
 
-  // p.3: Part Drawing (if present)
   if (drawingStamped) {
     const drawPdf    = await PDFDocument.load(drawingStamped, { ignoreEncryption: true });
     const [drawPage] = await merged.copyPages(drawPdf, [0]);
     merged.addPage(drawPage);
   }
 
-  // p.4+ (or p.3+ if no drawing): remaining QIR pages
   for (let i = 1; i < qirPages.length; i++) merged.addPage(qirPages[i]);
 
-  // Certs — normalise rotation first, then stamp footer on every page
+  // Certs — rotation-aware footer on every page, no heading on first page
   for (const cert of certEntries) {
-    let bytes = await normaliseRotation(cert.bytes);
-    // To re-enable scaling, uncomment the next line (normalise must run first):
-    // bytes = await fitPageToA4Landscape(bytes);
-    bytes     = await stampPageNumbers(bytes, cert.startPage, cert.label);
+    // To re-enable scaling, uncomment the next two lines (comment out the third):
+    // let bytes = await fitPageToA4Landscape(cert.bytes);
+    // bytes     = await stampPageNumbers(bytes, cert.startPage, cert.label);
+    let bytes = await stampPageNumbers(cert.bytes, cert.startPage, cert.label);
     const cp  = await PDFDocument.load(bytes, { ignoreEncryption: true });
     const pgs = await merged.copyPages(cp, cp.getPageIndices());
     pgs.forEach(p => merged.addPage(p));

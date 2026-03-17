@@ -189,40 +189,51 @@ async function prepareDrawingPage(drawingUrl, pageNum) {
 const TARGET_W = 841.89;
 const TARGET_H = 595.28;
 
+// Handling pdfs with 90' and 270' rotations
 async function fitPageToA4Landscape(pdfBytes) {
   // We rebuild each page into a new PDF, embedding the original as an XObject.
   // This is the most reliable way to scale+centre PDF page content in pdf-lib
   // without wrestling with raw content stream transforms.
   const srcPdf  = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
   const outPdf  = await PDFDocument.create();
-
+ 
   for (let i = 0; i < srcPdf.getPageCount(); i++) {
     // Embed the source page as an XObject (form) in the output PDF
     const [embedded] = await outPdf.embedPdf(srcPdf, [i]);
-
-    const srcPage = srcPdf.getPages()[i];
-    const pageW   = srcPage.getWidth();
-    const pageH   = srcPage.getHeight();
-
+ 
+    const srcPage  = srcPdf.getPages()[i];
+    const rawW     = srcPage.getWidth();
+    const rawH     = srcPage.getHeight();
+ 
+    // Account for /Rotate — pdf-lib ignores it when embedding as XObject.
+    // Swap effective dimensions so scale/offset are calculated on the
+    // visually-correct orientation, then pass swapped width/height to
+    // drawPage so it renders with the corrected aspect ratio.
+    const rotation  = srcPage.getRotation().angle; // 0, 90, 180, 270
+    const isSwapped = rotation === 90 || rotation === 270;
+    const pageW     = isSwapped ? rawH : rawW;
+    const pageH     = isSwapped ? rawW : rawH;
+ 
     // Uniform scale — capped at 1.0 (never upscale)
     const scale   = Math.min(TARGET_W / pageW, TARGET_H / pageH, 1.0);
-    const scaledW = pageW  * scale;
-    const scaledH = pageH  * scale;
-
+    const scaledW = pageW * scale;
+    const scaledH = pageH * scale;
+ 
     // Offset to centre scaled content on target page
     const offsetX = (TARGET_W - scaledW) / 2;
     const offsetY = (TARGET_H - scaledH) / 2;
-
+ 
     // Create a fresh A4 landscape page
     const newPage = outPdf.addPage([TARGET_W, TARGET_H]);
-
+ 
     // White background
     newPage.drawRectangle({
       x: 0, y: 0, width: TARGET_W, height: TARGET_H,
       color: rgb(1, 1, 1), opacity: 1.0,
     });
-
-    // Draw the embedded page content, scaled and centred
+ 
+    // Draw embedded page — pass swapped width/height for rotated pages
+    // so pdf-lib renders with corrected orientation on the new canvas
     newPage.drawPage(embedded, {
       x: offsetX, y: offsetY,
       width:  scaledW,
@@ -230,9 +241,54 @@ async function fitPageToA4Landscape(pdfBytes) {
       opacity: 1.0,
     });
   }
-
+ 
   return Buffer.from(await outPdf.save());
 }
+
+// async function fitPageToA4Landscape(pdfBytes) {
+//   // We rebuild each page into a new PDF, embedding the original as an XObject.
+//   // This is the most reliable way to scale+centre PDF page content in pdf-lib
+//   // without wrestling with raw content stream transforms.
+//   const srcPdf  = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+//   const outPdf  = await PDFDocument.create();
+
+//   for (let i = 0; i < srcPdf.getPageCount(); i++) {
+//     // Embed the source page as an XObject (form) in the output PDF
+//     const [embedded] = await outPdf.embedPdf(srcPdf, [i]);
+
+//     const srcPage = srcPdf.getPages()[i];
+//     const pageW   = srcPage.getWidth();
+//     const pageH   = srcPage.getHeight();
+
+//     // Uniform scale — capped at 1.0 (never upscale)
+//     const scale   = Math.min(TARGET_W / pageW, TARGET_H / pageH, 1.0);
+//     const scaledW = pageW  * scale;
+//     const scaledH = pageH  * scale;
+
+//     // Offset to centre scaled content on target page
+//     const offsetX = (TARGET_W - scaledW) / 2;
+//     const offsetY = (TARGET_H - scaledH) / 2;
+
+//     // Create a fresh A4 landscape page
+//     const newPage = outPdf.addPage([TARGET_W, TARGET_H]);
+
+//     // White background
+//     newPage.drawRectangle({
+//       x: 0, y: 0, width: TARGET_W, height: TARGET_H,
+//       color: rgb(1, 1, 1), opacity: 1.0,
+//     });
+
+//     // Draw the embedded page content, scaled and centred
+//     newPage.drawPage(embedded, {
+//       x: offsetX, y: offsetY,
+//       width:  scaledW,
+//       height: scaledH,
+//       opacity: 1.0,
+//     });
+//   }
+
+//   return Buffer.from(await outPdf.save());
+// }
 
 // ── Index page ────────────────────────────────────────────────
 async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {

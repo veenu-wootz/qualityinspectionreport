@@ -61,6 +61,81 @@ async function fetchPDF(url) {
   return Buffer.from(await res.arrayBuffer());
 }
 
+// ── Normalise page rotation ───────────────────────────────────
+// Bakes out /Rotate entries (90, 180, 270) by physically transforming
+// the content stream and resetting /Rotate to 0.
+// Pages with /Rotate 0 or non-standard angles are left untouched.
+// After this, all pages have origin at bottom-left, /Rotate: 0,
+// so stamping and scaling work correctly regardless of source PDF.
+async function normaliseRotation(pdfBytes) {
+  const pdf   = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+  const pages = pdf.getPages();
+  let changed = false;
+
+  for (const page of pages) {
+    const rotation = page.getRotation().angle;
+    if (rotation === 0) continue;  // nothing to do
+
+    const { width: w, height: h } = page.getMediaBox();
+
+    // Build the transform matrix that corrects the rotation.
+    // PDF content stream uses [a b c d e f] cm operator.
+    // We translate + rotate so content appears upright on a fresh canvas.
+    let matrix;
+    if (rotation === 90) {
+      // Content is rotated 90° CW by viewer. Counter-rotate 90° CCW.
+      // New page dims: swap w/h. Matrix: [0 1 -1 0 h 0]
+      matrix = [0, 1, -1, 0, h, 0];
+      page.setMediaBox(0, 0, h, w);
+      try { page.setCropBox(0, 0, h, w); } catch(_) {}
+    } else if (rotation === 180) {
+      // Counter-rotate 180°. Matrix: [-1 0 0 -1 w h]
+      matrix = [-1, 0, 0, -1, w, h];
+      // Dimensions stay the same
+    } else if (rotation === 270) {
+      // Content is rotated 270° CW by viewer. Counter-rotate 90° CW.
+      // New page dims: swap w/h. Matrix: [0 -1 1 0 0 w]
+      matrix = [0, -1, 1, 0, 0, w];
+      page.setMediaBox(0, 0, h, w);
+      try { page.setCropBox(0, 0, h, w); } catch(_) {}
+    } else {
+      continue;  // non-standard angle — skip safely
+    }
+
+    // Prepend the correcting transform to the page content stream
+    const [a, b, c, d, e, f] = matrix;
+    const transformOp = `${a} ${b} ${c} ${d} ${e} ${f} cm\n`;
+    const existing    = page.getContentStream ? page.getContentStream() : null;
+
+    // Use pdf-lib's raw content stream access to prepend transform
+    page.node.wrapContentStreams();
+    const streamRef = page.node.get(page.node.PDFName.of('Contents'));
+    if (streamRef) {
+      try {
+        const stream    = pdf.context.lookup(streamRef);
+        const oldBytes  = stream.getContents ? stream.getContents() :
+                          stream.contents    ? stream.contents       : new Uint8Array();
+        const prefix    = new TextEncoder().encode(`q\n${transformOp}`);
+        const suffix    = new TextEncoder().encode('\nQ\n');
+        const newBytes  = new Uint8Array(prefix.length + oldBytes.length + suffix.length);
+        newBytes.set(prefix, 0);
+        newBytes.set(oldBytes, prefix.length);
+        newBytes.set(suffix, prefix.length + oldBytes.length);
+        if (stream.setContents) stream.setContents(newBytes);
+      } catch(e) {
+        console.warn(`  normaliseRotation: content stream manipulation failed — ${e.message}`);
+      }
+    }
+
+    // Clear the /Rotate entry
+    page.setRotation({ type: 'degrees', angle: 0 });
+    changed = true;
+    console.log(`  normaliseRotation: baked out ${rotation}° rotation`);
+  }
+
+  return changed ? Buffer.from(await pdf.save()) : pdfBytes;
+}
+
 // ── Stamp page number + logo on every page of a PDF ──────────
 async function stampPageNumbers(pdfBytes, startPageNum, label = null) {
   const pdf       = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
@@ -116,7 +191,7 @@ async function stampPageNumbers(pdfBytes, startPageNum, label = null) {
         y: textY, size: fontSize, font, color: rgb(0.20, 0.20, 0.20),
       });
     } else {
-      // Default: page number centred (QIR + drawing pages)
+      // Default: page number right-aligned
       page.drawText(pgStr, {
         x: bx + width - PAD_R - pgW,
         y: textY, size: fontSize, font, color: rgb(0.20, 0.20, 0.20),
@@ -186,6 +261,7 @@ async function prepareDrawingPage(drawingUrl, pageNum) {
 //   - If both dimensions within target   → no scaling, just centre
 //   - In both cases: set page to target size, white background, content centred
 //   - Never scales up (scale capped at 1.0)
+// NOTE: Call normaliseRotation() before this to ensure correct orientation.
 const TARGET_W = 841.89;
 const TARGET_H = 595.28;
 
@@ -274,7 +350,7 @@ async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
     } catch(e) {}
   }
 
-  // Page number centred in footer
+  // Page number right-aligned in footer
   const p2Str = '2';
   const p2W   = fontNormal.widthOfTextAtSize(p2Str, PG_FONT_SIZE);
   page.drawText(p2Str, {
@@ -319,10 +395,6 @@ async function buildIndexPage({ qirPageCount, hasDrawing, certEntries }) {
   drawRow('Part Information', 1);
   drawRow('Content Table', 2);
 
-  // Page 3 is drawing if present, otherwise inspection starts at 3
-  // QIR p.2 onwards maps to: final = i === 0 ? 1 : (hasDrawing ? i+3 : i+2)
-  // Drawing = p.3 (if present)
-  // QIR remaining pages start at p.3 (no drawing) or p.4 (with drawing)
   let nextQirPage = hasDrawing ? 4 : 3;
 
   if (hasDrawing) {
@@ -385,14 +457,9 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
   }
 
   // ── Page number layout ────────────────────────────────────────
-  // p.1           = QIR p.1
-  // p.2           = Index
-  // p.3           = Part Drawing (if present)
-  // p.3 or p.4+   = remaining QIR pages
-  // p.N+2 or N+3  = first cert
-  const drawingPageNum  = 3;                                          // always p.3 if present
-  const qirRemapOffset  = hasDrawing ? 3 : 2;                        // QIR p.2 → final p.4 (drawing) or p.3 (no drawing)
-  const certStartPage   = qirPageCount + 1 + (hasDrawing ? 1 : 0) + 1; // = qirPages + index + drawing? + 1
+  const drawingPageNum  = 3;
+  const qirRemapOffset  = hasDrawing ? 3 : 2;
+  const certStartPage   = qirPageCount + 1 + (hasDrawing ? 1 : 0) + 1;
   let   runningPage     = certStartPage;
 
   const certEntries = certData.map(c => {
@@ -411,7 +478,6 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
   const indexBytes = await buildIndexPage({ qirPageCount, hasDrawing, certEntries });
 
   // Stamp QIR pages
-  // p.1 stays as p.1; p.2..N → p.(qirRemapOffset+1)..(qirRemapOffset+N-1)
   const qirForStamp = await PDFDocument.load(qirBuffer, { ignoreEncryption: true });
   const qirFont     = await qirForStamp.embedFont(StandardFonts.Helvetica);
   const logoBytes   = logoPngBytes;
@@ -465,6 +531,9 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
       singleDoc.addPage(pg1);
       let drawBytes   = Buffer.from(await singleDoc.save());
 
+      // Normalise rotation (bake out /Rotate so stamping lands correctly)
+      drawBytes = await normaliseRotation(drawBytes);
+
       // Fit to A4 landscape (scale down if needed, centre, white background)
       // drawBytes = await fitPageToA4Landscape(drawBytes);
 
@@ -505,13 +574,12 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
   // p.4+ (or p.3+ if no drawing): remaining QIR pages
   for (let i = 1; i < qirPages.length; i++) merged.addPage(qirPages[i]);
 
-  // Certs — label in footer on every page, no heading on first page
+  // Certs — normalise rotation first, then stamp footer on every page
   for (const cert of certEntries) {
-    // let bytes = await fitPageToA4Landscape(cert.bytes);
-    // bytes     = await stampPageNumbers(bytes, cert.startPage, cert.label);
-
-    let bytes = await stampPageNumbers(cert.bytes, cert.startPage, cert.label);
-    
+    let bytes = await normaliseRotation(cert.bytes);
+    // To re-enable scaling, uncomment the next line (normalise must run first):
+    // bytes = await fitPageToA4Landscape(bytes);
+    bytes     = await stampPageNumbers(bytes, cert.startPage, cert.label);
     const cp  = await PDFDocument.load(bytes, { ignoreEncryption: true });
     const pgs = await merged.copyPages(cp, cp.getPageIndices());
     pgs.forEach(p => merged.addPage(p));

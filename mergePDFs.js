@@ -20,7 +20,7 @@
  */
 
 const fetch = require('node-fetch');
-const { PDFDocument, rgb, StandardFonts, PDFName, PDFRawStream } = require('pdf-lib');
+const { PDFDocument, rgb, StandardFonts, PDFName, PDFRawStream, decodePDFRawStream } = require('pdf-lib');
 
 // ── Logo — fetched once, reused across all requests ──────────
 const LOGO_URL = 'https://res.cloudinary.com/dbwg6zz3l/image/upload/w_300,f_png,q_90/v1773643264/Black_Yellow_kq9kef.png';
@@ -125,12 +125,18 @@ async function normaliseRotation(pdfBytes) {
     for (const ref of refs) {
       const stream = pdf.context.lookup(ref);
       if (!stream || !(stream instanceof PDFRawStream)) continue;
-      const old    = stream.getContents();
-      const merged = new Uint8Array(prefix.length + old.length + suffix.length);
+      // Decode (decompress) the stream first before prepending transform.
+      // getContents() returns raw compressed bytes — mixing plain text with
+      // compressed data produces a blank page. decodePDFRawStream decompresses.
+      const decoded = decodePDFRawStream(stream).decode();
+      const merged  = new Uint8Array(prefix.length + decoded.length + suffix.length);
       merged.set(prefix, 0);
-      merged.set(old, prefix.length);
-      merged.set(suffix, prefix.length + old.length);
+      merged.set(decoded, prefix.length);
+      merged.set(suffix, prefix.length + decoded.length);
       stream.contents = merged;
+      // Remove Filter/DecodeParms — content is now plain uncompressed text
+      stream.dict.delete(PDFName.of('Filter'));
+      stream.dict.delete(PDFName.of('DecodeParms'));
     }
 
     // Clear /Rotate

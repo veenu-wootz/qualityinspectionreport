@@ -261,6 +261,7 @@ async function generateQIR(data) {
     const showSpec       = !allBlank(data.dimRows, 'specificat');
     const showInstrument = !allBlank(data.dimRows, 'instrument');
     const showStatus     = !allBlank(data.dimRows, 'status_1');
+    const showDimComment = !allBlank(data.dimRows, 'comment');
     // Photo column: blank means no fetched image for that row
     const showDimPhoto   = data.dimRows.some((_, i) => !!dimPhotoMap[i]);
 
@@ -270,8 +271,9 @@ async function generateQIR(data) {
     const SPEC_W       = showSpec       ? CW * 0.115 : 0;
     const INSTR_W      = showInstrument ? CW * 0.10  : 0;
     const STATUS_W     = showStatus     ? CW * 0.065 : 0;
+    const COMMENT_W    = showDimComment ? CW * 0.18 : 0;
     const PHOTO_W      = showDimPhoto   ? CW * 0.08  : 0;
-    const FIXED_TOTAL  = FIXED_NO_W + FIXED_PAR_W + SPEC_W + INSTR_W + STATUS_W + PHOTO_W;
+    const FIXED_TOTAL  = FIXED_NO_W + FIXED_PAR_W + SPEC_W + INSTR_W + STATUS_W + COMMENT_W + PHOTO_W;
     const sColW        = (CW - FIXED_TOTAL) / n;
 
     // Build header row and body rows with only present columns
@@ -280,6 +282,7 @@ async function generateQIR(data) {
     if (showInstrument) dimHead.push('Instrument');
     dimHead.push(...Array.from({ length: n }, (_, i) => `${i + 1}`));
     if (showStatus)     dimHead.push('Status');
+    if (showDimComment) dimHead.push('Comments');
     if (showDimPhoto)   dimHead.push('Photo');
 
     const dimBody = data.dimRows.map(r => {
@@ -288,6 +291,7 @@ async function generateQIR(data) {
       if (showInstrument) row.push(r.instrument   || '');
       row.push(...r.samples.slice(0, n).concat(Array(Math.max(0, n - r.samples.length)).fill('')));
       if (showStatus)   row.push(r.status_1 || '');
+      if (showDimComment) row.push(r.comment || '');
       if (showDimPhoto) row.push('');
       return row;
     });
@@ -298,6 +302,7 @@ async function generateQIR(data) {
     const instrIdx  = showInstrument ? ci++ : -1;
     const sampleStart = ci; ci += n;
     const statusIdx = showStatus   ? ci++ : -1;
+    const commentIdx = showDimComment ? ci++ : -1;
     const photoIdx  = showDimPhoto ? ci   : -1;
 
     const dimColStyles = {
@@ -308,6 +313,7 @@ async function generateQIR(data) {
     if (showSpec)       dimColStyles[specIdx]  = { cellWidth: SPEC_W };
     if (showInstrument) dimColStyles[instrIdx]  = { cellWidth: INSTR_W };
     if (showStatus)     dimColStyles[statusIdx] = { cellWidth: STATUS_W };
+    if (showDimComment) dimColStyles[commentIdx] = { cellWidth: COMMENT_W, halign: 'left' };
     if (showDimPhoto)   dimColStyles[photoIdx]  = { cellWidth: PHOTO_W };
 
     doc.autoTable({

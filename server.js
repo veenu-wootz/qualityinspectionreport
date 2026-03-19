@@ -135,8 +135,9 @@ function parsePayload(body) {
     item_code:       sample.item_code    || '',
     heat_no:         sample.heat_no      || '',
     order_qty:       sample.qty          || '',
-    remarks:         sample.remark       || '',
+    samples_checked: sample.samples_checked || '',
     verified_by:     sample.verified_by  || 'Unverified',
+    remarks:         sample.remark       || '',
     conclusion:      '',
     
     // Drawing / images

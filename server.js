@@ -23,6 +23,8 @@ const express          = require('express');
 const { generateQIR }  = require('./generateQIR');
 const { buildMergedPDF } = require('./mergePDFs');
 const { sendQIREmail } = require('./sendEmail');
+const { uploadToS3 } = require('./awsUpload');
+const { addCheckinRow } = require('./appsheetRows');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -108,7 +110,7 @@ function parsePayload(body) {
         photo:     appsheetFileUrl(row.qc_photo),
       });
 
-    } else if (type === 'test' || type === 'certificate' || type === 'pdf') {
+    } else if (type === 'test' || type === 'certificate' || type === 'report' || type === 'attachment' ) {
       const docUrl = appsheetFileUrl(row.test_doc);
       if (docUrl) {
         certDocs.push({
@@ -126,10 +128,13 @@ function parsePayload(body) {
     // Header fields
     report_no:       sample.sample_id    || `QIR-${Date.now()}`,
     submission_date: sample.created_at   || new Date().toISOString().split('T')[0],
+    id:              sample.id           || '',
     part_name:       sample.part_name    || '',
     part_number:     sample.part_number  || '',
+    project_pocs:    sample.project_pocs || '',
     customer:        sample.customer_name|| '',
     created_by:      sample.created_by   || '',
+    created_by_email: sample.created_by_email || '',
     title:           sample.title        || '',
     rm_grade:        sample.rm_grade     || '',
     item_code:       sample.item_code    || '',
@@ -137,7 +142,9 @@ function parsePayload(body) {
     order_qty:       sample.qty          || '',
     samples_checked: sample.samples_checked || '',
     verified_by:     sample.verified_by  || 'Unverified',
+    add_to_checkin:  sample.add_to_checkin === true || sample.add_to_checkin === 'true',
     remarks:         sample.remark       || '',
+    timestamp:       sample.timestamp    || '',
     conclusion:      '',
     
     // Drawing / images
@@ -174,8 +181,9 @@ app.post('/generate', async (req, res) => {
     console.log('━━━━━━━━━━━━ PARSED DATA ━━━━━━━━━━━━');
     console.log(`  report_no:       ${data.report_no}`);
 
-    const filename = `Inspection Report-${data.title}-${Date.now()}.pdf`
-      .replace(/[^a-zA-Z0-9\-_.]/g, '_');
+    const filename = `Inspection Report-${data.title}-${data.timestamp}.pdf`;
+
+    const s3FileUrlName = `${data.report_no}-${data.timestamp}.pdf`.replace(/[^a-zA-Z0-9\-_.]/g, '_');
 
     // 1. Generate QIR PDF (HTML → jsPDF)
     console.log('\n[1/3] Generating QIR PDF...');
@@ -192,11 +200,26 @@ app.post('/generate', async (req, res) => {
       hasDrawing:     !!data.part_drawing,
       hasDim:         data.dimRows.length  > 0,
       hasVis:         data.visRows.length  > 0,
-      verifiedBy:     data.verified_by,      
+      verifiedBy:     data.verified_by,
     });
     console.log(`  Merged: ${(mergedBuffer.length / 1024).toFixed(0)} KB`);
 
-    // 3. Send email
+    // 3. If verified — upload to Drive and append to Sheet
+    let driveUrl = null;
+    if (data.verified_by && data.verified_by !== 'Unverified' && data.add_to_checkin) {
+      try {
+        console.log('\n[3/5] Uploading to AWS_s3...');
+        driveUrl = await uploadToS3(mergedBuffer, s3FileUrlName);
+ 
+        console.log('\n[4/5] Appending to Appsheet...');
+        await addCheckinRow(data, driveUrl);
+      } catch (uploadErr) {
+        // Non-fatal — log and continue to email
+        console.error('  Appsheet error (non-fatal):', uploadErr.message);
+      }
+    }
+    
+    // 4. Send email
     console.log('\n[3/3] Sending email...');
     await sendQIREmail(data, mergedBuffer, filename);
 

@@ -445,7 +445,7 @@ async function stampWatermark(pdfBytes) {
     const cy       = box.y + H / 2;
 
     // Font size: 10% of shorter side — large enough to span diagonally but not crop
-    const fontSize = Math.min(W, H) * 0.15;
+    const fontSize = Math.min(W, H) * 0.12;
     const textW    = font.widthOfTextAtSize('UNVERIFIED', fontSize);
     const angle    = 45 * Math.PI / 180;
 
@@ -465,6 +465,31 @@ async function stampWatermark(pdfBytes) {
 
   return Buffer.from(await pdf.save());
 }
+
+// async function stampWatermark(pdfBytes) {
+//   const pdf  = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
+//   const font = await pdf.embedFont(StandardFonts.HelveticaBold);
+
+//   pdf.getPages().forEach(page => {
+//     const box      = getVisibleBox(page);
+//     const cx       = box.x + box.width  / 2;
+//     const cy       = box.y + box.height / 2;
+//     const fontSize = Math.min(box.width, box.height) * 0.15;
+//     const textW    = font.widthOfTextAtSize('UNVERIFIED', fontSize);
+
+//     page.drawText('UNVERIFIED', {
+//       x:       cx - textW / 2,
+//       y:       cy - fontSize / 2,
+//       size:    fontSize,
+//       font,
+//       color:   rgb(0.75, 0.75, 0.75),
+//       opacity: 0.15,
+//       rotate:  degrees(45),
+//     });
+//   });
+
+//   return Buffer.from(await pdf.save());
+// }
 
 // ── Main ──────────────────────────────────────────────────────
 async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
@@ -612,7 +637,7 @@ async function buildMergedPDF(qirBuffer, certs = [], meta = {}) {
     pgs.forEach(p => merged.addPage(p));
     console.log(`    "${cert.label}" p.${cert.startPage}–${cert.startPage + cert.pageCount - 1}`);
   }
-
+  
   console.log(`  Final: ${merged.getPageCount()} pages`);
   const finalBytes = Buffer.from(await merged.save());
   if (!meta.verifiedBy || meta.verifiedBy === 'Unverified') {

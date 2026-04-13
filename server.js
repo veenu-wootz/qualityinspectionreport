@@ -220,7 +220,7 @@ app.post('/generate', async (req, res) => {
     }
     
     // 4. Send email
-    console.log('\n[3/3] Sending email...');
+    console.log('\n[5/5] Sending email...');
     await sendQIREmail(data, mergedBuffer, filename);
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);

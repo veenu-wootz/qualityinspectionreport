@@ -218,10 +218,12 @@ app.post('/generate', async (req, res) => {
         console.error('  Appsheet error (non-fatal):', uploadErr.message);
       }
     }
-    
-    // 4. Send email
-    console.log('\n[5/5] Sending email...');
-    await sendQIREmail(data, mergedBuffer, filename);
+
+    // 4. Send email only if not uploading to checkin
+    if (!data.add_to_checkin) {
+      console.log('\n Sending email...');
+      await sendQIREmail(data, mergedBuffer, filename);
+    }    
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
     console.log(`\n✓ Done in ${elapsed}s — ${filename}\n`);

@@ -25,6 +25,7 @@ const { buildMergedPDF } = require('./mergePDFs');
 const { sendQIREmail } = require('./sendEmail');
 const { uploadToS3 } = require('./awsUpload');
 const { addCheckinRow } = require('./appsheetRows');
+const { addToCheckin } = require('./appsheetCheckin');
 
 const app  = express();
 const PORT = process.env.PORT || 3000;
@@ -143,6 +144,7 @@ function parsePayload(body) {
     samples_checked: sample.samples_checked || '',
     verified_by:     sample.verified_by  || 'Unverified',
     add_to_checkin:  sample.add_to_checkin === true || sample.add_to_checkin === 'true',
+    sample_type:     sample.sample_type || '',
     remarks:         sample.remark       || '',
     timestamp:       sample.timestamp    || '',
     conclusion:      '',
@@ -178,8 +180,8 @@ app.post('/generate', async (req, res) => {
     const data = parsePayload(req.body);
 
     // ── Parsed result ──
-    console.log('━━━━━━━━━━━━ PARSED DATA ━━━━━━━━━━━━');
-    console.log(`  report_no:       ${data.report_no}`);
+    // console.log('━━━━━━━━━━━━ PARSED DATA ━━━━━━━━━━━━');
+    // console.log(`  report_no:       ${data.report_no}`);
 
     const filename = `Inspection Report-${data.title}-${data.timestamp}.pdf`;
 
@@ -213,6 +215,9 @@ app.post('/generate', async (req, res) => {
  
         console.log('\n[4/5] Appending to Appsheet...');
         await addCheckinRow(data, driveUrl);
+        if (data.sample_type === 'Production sample') {
+          await addToCheckin(data, driveUrl);
+        }
       } catch (uploadErr) {
         // Non-fatal — log and continue to email
         console.error('  Appsheet error (non-fatal):', uploadErr.message);
